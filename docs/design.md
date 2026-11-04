@@ -55,7 +55,7 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 | `reviewing` | レビュー中 |
 | `fix` | レビューの指摘に対応中。終わったら `ci` → `reviewing` に戻る |
 | `done` | 完成（レビュー通過） |
-| `unresolved` | レビューを2周しても指摘が残った |
+| `unresolved` | 2周しても指摘が残った、または CI が通らなかった |
 | `finished` | PR がマージまたはクローズされた。一覧には出さない |
 | `error` | システムエラーで止まった。人が retry するまで動かない |
 
@@ -137,7 +137,11 @@ GUI からは REST、Claude アプリからは同じ機能を MCP ツールと�
 ### システム内部
 
 - キューから次の task を取り出し、AI を起動または resume する
-- `ci` の task の CI 結果を GitHub で確認し、`reviewing` に進める
+- `ci` の task の CI 結果を GitHub にポーリングで確認する
+  - 判定：PR の最新コミットの check がすべて終わったら完了
+  - 成功なら `reviewing`、失敗なら `fix`（直すのは開発 AI）
+  - CI の有無はリポジトリに `.github/workflows` があるかで判定する。ない場合は `ci` を飛ばす
+  - CI の状態を GUI に出すのは後回し
 - PR のマージ・クローズを検知して `finished` にする
 - 各段階で event を記録する
 
@@ -191,7 +195,7 @@ erDiagram
     int id PK
     int task_id FK
     int round_no "1 / 2"
-    enum result "approved / changes_requested"
+    enum result "approved / changes_requested / ci_failed"
     text comments
   }
   event {
@@ -203,6 +207,7 @@ erDiagram
   }
 ```
 
+- `review_round` は CI の失敗も1周として記録する（`result` = `ci_failed`）。レビューと CI の失敗を合わせて最大2周
 - `session` は `(task_id, role)` を一意にして、タスク1つにつき dev と review を1つずつに固定する。作り直しが必要になったら制約を外す
 - `event` は節目だけを記録する：AI に渡したもの、AI の最終結果、セッション開始・resume、status の変化、PR・CI・レビューの結果、エラー。AI の途中の発言やコマンドは各 AI 自身の記録に任せ、event にはその記録の場所だけを残す
 - タスクの実行フローは、そのタスクの dev と review の event を時系列に並べて追う
