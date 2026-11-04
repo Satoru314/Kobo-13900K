@@ -86,7 +86,8 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 キュー専用のテーブルは持たず、task を並べたものをキューとみなす。
 
 - **対象**：status が `runnable` / `reviewing` / `fix` で、`running` でない task
-- **順番**：`fix` → `immediate` → `off_peak`（安い時間帯の間だけ）。それぞれの中では `enqueued_at` の古い順
+- **順番**：`fix` → `reviewing` → 新規（`immediate`）→ 新規（`off_peak`、安い時間帯の間だけ）。それぞれの中では `enqueued_at` の古い順
+- mode が効くのは新規（`runnable`）だけ。始まったタスクのレビューと fix は時間帯に関係なく進める
 - **実行モード**（`task.mode`）
   - `immediate`：順番が来しだい実行する
   - `off_peak`：安い時間帯になるまで待つ。安い時間帯は設定で時刻の範囲として決める（例: DeepSeek のオフピーク割引の時間帯）
@@ -147,7 +148,7 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 
 ### AI 向け
 
-実行中の AI だけが呼ぶ MCP ツール。
+実行中の AI だけが呼ぶ MCP ツール。ユーザー向けとは別のエンドポイント `/mcp/agent` で受ける。
 
 | MCP ツール | 内容 |
 |---|---|
@@ -259,10 +260,12 @@ erDiagram
   task ||--o| pull_request : "PR"
   task ||--o{ session : "dev / review"
   task ||--o{ review_round : "レビュー結果"
-  session ||--o{ event : "実行ログ"
+  task ||--o{ event : "実行ログ"
+  session ||--o{ event : "AI セッション内のもの"
 
   project {
     int id PK
+    text dir "~/programF 直下のディレクトリ名 (unique)"
     text owner
     text name
     text default_branch
@@ -285,6 +288,7 @@ erDiagram
     int task_id FK "unique"
     int number
     text url
+    text branch
     enum state "open / merged / closed"
     timestamp created_at
     timestamp merged_at "nullable"
@@ -306,7 +310,8 @@ erDiagram
   }
   event {
     int id PK
-    int session_id FK
+    int task_id FK
+    int session_id FK "nullable"
     text type
     json payload
     timestamp created_at
@@ -315,6 +320,7 @@ erDiagram
 
 - `review_round` は CI の失敗も1周として記録する（`result` = `ci_failed`）。レビューと CI の失敗を合わせて最大2周
 - `session` は `(task_id, role)` を一意にして、タスク1つにつき dev と review を1つずつに固定する。作り直しが必要になったら制約を外す
+- `event` は task に紐づく。AI のセッション内で起きたものは `session_id` も持つ（CI の結果などセッション外の event もあるため）
 - `event` は節目だけを記録する：AI に渡したもの、AI の最終結果、セッション開始・resume、status の変化、PR・CI・レビューの結果、エラー。AI の途中の発言やコマンドは各 AI 自身の記録に任せ、event にはその記録の場所だけを残す
 - タスクの実行フローは、そのタスクの dev と review の event を時系列に並べて追う
 - 作業対象のリポジトリは `project` と呼ぶ。repository 層と名前がぶつからないようにするため
