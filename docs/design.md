@@ -58,6 +58,7 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 | `unresolved` | 2周しても指摘が残った、または CI が通らなかった |
 | `finished` | PR がマージまたはクローズされた。一覧には出さない |
 | `error` | システムエラー、または AI が「進められない」と報告して止まった。人が retry するまで動かない |
+| `cancelled` | ユーザーが取り消した（`runnable` のときだけ）。一覧には出さない |
 
 - `done` と `unresolved` は同じ一覧に PR リンク付きで並べ、status で見分ける
 - マージかクローズかの区別は `pull_request.state` で持つ
@@ -97,6 +98,10 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 - AI は実装して PR を作り、終わったら Kobo に完了を通知する（PR の URL と要約を添える）
 - 通知を受けたら Kobo がプロセスを止めて status を進める。会話は残しておき、次に resume する
 - 完了通知を出さずにプロセスが終わったら、システムエラーとして扱う
+- **権限**：AI は確認なしで全部許可して動かす（Claude Code なら `--dangerously-skip-permissions`）。止まらないことを優先する
+- **実行時間の上限**：開発と fix は60分、レビューは30分（設定で変えられる）。超えたらプロセスを確実に止めてシステムエラーにする
+- **完了通知の本人確認はしない**：直列なので、通知は常に実行中のタスクのもの。そのため時間切れのプロセスは必ず止め、遅れて届く通知が起きないようにする
+- **レビュー**：レビュー AI は指摘を PR にコメントとして書き、結果を `complete_review` で Kobo に返す
 
 ### 作業ディレクトリ
 
@@ -119,7 +124,7 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 | GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
 | GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
 | PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`runnable` と `error` の間だけ |
-| POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`runnable` の間だけ（取り消し後の status は未決） |
+| POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`runnable` の間だけ。`cancelled` にする |
 | POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
 | GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
 
