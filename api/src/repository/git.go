@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,29 +34,25 @@ func (g *Git) Remote(ctx context.Context, repoDir string) (irepository.RemoteInf
 	if m == nil {
 		return irepository.RemoteInfo{}, fmt.Errorf("origin %q is not a GitHub repository", url)
 	}
-	branch, err := g.defaultBranch(ctx, repoDir, m[1], m[2])
+	branch, err := g.defaultBranch(ctx, repoDir)
 	if err != nil {
 		return irepository.RemoteInfo{}, err
 	}
 	return irepository.RemoteInfo{Owner: m[1], Name: m[2], DefaultBranch: branch}, nil
 }
 
-// defaultBranch reads origin/HEAD from the local clone, and asks GitHub through gh
-// when the clone does not know it.
-func (g *Git) defaultBranch(ctx context.Context, repoDir, owner, name string) (string, error) {
-	if ref, err := g.cmd.output(ctx, repoDir, "git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		if branch, ok := strings.CutPrefix(ref, "origin/"); ok && branch != "" {
-			return branch, nil
+// defaultBranch asks origin which branch HEAD points to.
+func (g *Git) defaultBranch(ctx context.Context, repoDir string) (string, error) {
+	out, err := g.cmd.output(ctx, repoDir, "git", "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ref, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			return strings.Fields(ref)[0], nil
 		}
 	}
-	branch, err := g.cmd.output(ctx, repoDir, "gh", "api", "repos/"+owner+"/"+name, "--jq", ".default_branch")
-	if err != nil {
-		return "", fmt.Errorf("find default branch: %w", err)
-	}
-	if branch == "" {
-		return "", fmt.Errorf("%s/%s has no default branch", owner, name)
-	}
-	return branch, nil
+	return "", fmt.Errorf("origin has no default branch")
 }
 
 func (g *Git) AddWorktree(ctx context.Context, repoDir, path, branch, base string) error {
@@ -79,14 +76,10 @@ func (g *Git) AddWorktree(ctx context.Context, repoDir, path, branch, base strin
 }
 
 func (g *Git) RemoveWorktree(ctx context.Context, repoDir, path string) error {
-	if _, err := os.Stat(path); err == nil {
-		// A broken worktree is still deleted from disk below.
-		_, _ = g.cmd.output(ctx, repoDir, "git", "worktree", "remove", "--force", path)
-		if err := os.RemoveAll(path); err != nil {
-			return err
-		}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	_, err := g.cmd.output(ctx, repoDir, "git", "worktree", "prune")
+	_, err := g.cmd.output(ctx, repoDir, "git", "worktree", "remove", "--force", path)
 	return err
 }
 
