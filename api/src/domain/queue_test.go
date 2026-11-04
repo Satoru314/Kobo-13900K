@@ -65,7 +65,7 @@ func TestQueueOrder(t *testing.T) {
 func TestQueueNext(t *testing.T) {
 	window, _ := ParseOffPeakWindow("01:00-07:00")
 	q := Queue{OffPeak: window}
-	noon := t0                                           // 12:00, outside the window
+	noon := t0                                            // 12:00, outside the window
 	night := time.Date(2026, 11, 5, 2, 0, 0, 0, time.UTC) // inside
 
 	offPeak := Task{ID: 1, Status: StatusRunnable, Mode: ModeOffPeak, EnqueuedAt: at(0)}
