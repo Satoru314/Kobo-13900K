@@ -57,10 +57,21 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 | `done` | 完成（レビュー通過） |
 | `unresolved` | レビューを2周しても指摘が残った |
 | `finished` | PR がマージまたはクローズされた。一覧には出さない |
+| `error` | システムエラーで止まった。人が retry するまで動かない |
 
 - `done` と `unresolved` は同じ一覧に PR リンク付きで並べ、status で見分ける
 - マージかクローズかの区別は `pull_request.state` で持つ
-- システムエラー（API エラー、push 失敗、完了通知なしでプロセスが終わった等）は task の status にしない。event に記録し、一覧に「エラーあり」を出す
+
+### システムエラー
+
+API エラー、利用枠の上限、push 失敗、完了通知なしでプロセスが終わった、など。あまり起きない想定。
+
+1. 少し間を置いて、同じ段階を自動でやり直す（2回まで）
+2. それでも失敗したら status を `error` にして止める
+3. 人が原因を見て retry すると、エラー前の status に戻してキューに入れる。セッションがあれば resume する
+
+やり直した回数、エラー前の status、原因はすべて event から求める。task に列は足さない。
+`ci` の段階のエラー（GitHub の確認に失敗する等）は AI を使わないので、Kobo が自動で確認し直す。
 
 ## キュー
 
@@ -80,6 +91,55 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 - AI に渡すのは、最初のタスク本文と、`fix` のときのレビュー指摘だけ
 - AI は実装して PR を作り、終わったら Kobo に完了を通知する（PR の URL と要約を添える）
 - 通知を受けたら Kobo がプロセスを止めて status を進める。会話は残しておき、次に resume する
+- 完了通知を出さずにプロセスが終わったら、システムエラーとして扱う
+
+### 作業ディレクトリ
+
+- リポジトリは `~/programF` の下にあるものを使う
+- ユーザーの作業ディレクトリには触れない。`git fetch` してから `origin/<default_branch>` を元に git worktree を作り、そこで作業する
+- worktree は作業が終わったら必ず消す。fix のときは PR のブランチから worktree を作り直す
+- セッションは worktree の中で立てる。resume はセッション ID を指定すれば別のディレクトリからでもできる（Claude Code 2.1.317 で確認）。AI が迷わないよう、作り直す worktree は前回と同じパスにする
+
+## 機能とエンドポイント
+
+### ユーザー向け
+
+GUI からは REST、Claude アプリからは同じ機能を MCP ツールとして呼ぶ。
+
+| メソッド | パス | MCP ツール | 内容 |
+|---|---|---|---|
+| GET | `/repositories` | `list_repositories` | 登録済みリポジトリ一覧 |
+| POST | `/tasks` | `create_task` | タスク発行。ディレクトリ名・タイトル・本文・mode を指定。未登録のリポジトリならここで登録し、owner / name / default_branch は git remote から埋める |
+| GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く |
+| GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
+| GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
+| PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`runnable` の間だけ |
+| POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`runnable` の間だけ（取り消し後の status は未決） |
+| POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
+| GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
+
+### AI 向け
+
+実行中の AI だけが呼ぶ MCP ツール。
+
+| MCP ツール | 内容 |
+|---|---|
+| `complete_development` | 開発・fix の完了通知。PR の URL と要約 |
+| `complete_review` | レビューの完了通知。approved / changes_requested と指摘 |
+
+### その他
+
+| メソッド | パス | 内容 |
+|---|---|---|
+| GET | `/` | GUI（状態一覧の画面） |
+| GET | `/health` | 生存確認 |
+
+### システム内部
+
+- キューから次の task を取り出し、AI を起動または resume する
+- `ci` の task の CI 結果を GitHub で確認し、`reviewing` に進める
+- PR のマージ・クローズを検知して `finished` にする
+- 各段階で event を記録する
 
 ## データモデル
 
@@ -152,4 +212,4 @@ erDiagram
 - サーバー：Go
 - DB：PostgreSQL
 - Docker で動かす。Proxmox の LXC に置く場合は nesting を有効にする
-- 置き場所は未定
+- 置き場所：CT102（開発環境）
