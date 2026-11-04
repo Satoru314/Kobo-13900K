@@ -113,7 +113,7 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 
 | メソッド | パス | MCP ツール | 内容 |
 |---|---|---|---|
-| GET | `/repositories` | `list_repositories` | 登録済みリポジトリ一覧 |
+| GET | `/projects` | `list_projects` | 登録済みプロジェクト（リポジトリ）一覧 |
 | POST | `/tasks` | `create_task` | タスク発行。ディレクトリ名・タイトル・本文・mode を指定。未登録のリポジトリならここで登録し、owner / name / default_branch は git remote から埋める |
 | GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く |
 | GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
@@ -155,13 +155,13 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 
 ```mermaid
 erDiagram
-  repository ||--o{ task : "対象"
+  project ||--o{ task : "対象"
   task ||--o| pull_request : "PR"
   task ||--o{ session : "dev / review"
   task ||--o{ review_round : "レビュー結果"
   session ||--o{ event : "実行ログ"
 
-  repository {
+  project {
     int id PK
     text owner
     text name
@@ -170,7 +170,7 @@ erDiagram
   }
   task {
     int id PK
-    int repository_id FK
+    int project_id FK
     text title
     text description
     enum status
@@ -217,6 +217,7 @@ erDiagram
 - `session` は `(task_id, role)` を一意にして、タスク1つにつき dev と review を1つずつに固定する。作り直しが必要になったら制約を外す
 - `event` は節目だけを記録する：AI に渡したもの、AI の最終結果、セッション開始・resume、status の変化、PR・CI・レビューの結果、エラー。AI の途中の発言やコマンドは各 AI 自身の記録に任せ、event にはその記録の場所だけを残す
 - タスクの実行フローは、そのタスクの dev と review の event を時系列に並べて追う
+- 作業対象のリポジトリは `project` と呼ぶ。repository 層と名前がぶつからないようにするため
 
 ## インフラ
 
@@ -248,36 +249,102 @@ erDiagram
 
 ## ファイル配置
 
+テストファイル（`_test.go`）は各ファイルの隣に置く。
+
 ```
 Kobo-13900K/
-├── api/                    バックエンド（Go）
-│   ├── src/
-│   │   ├── cmd/kobo/       起動処理。各層を手で DI して組み立てる
-│   │   ├── controller/     入口
-│   │   │   ├── rest/       GUI からの HTTP。router.go に URL とハンドラの対応表
-│   │   │   ├── mcp/        AI からの MCP。server.go にツール名とハンドラの対応表
-│   │   │   └── worker/     時間で動く入口（キューの取り出し、CI・PR のポーリング）
-│   │   ├── usecase/        やること。トランザクションとロックの範囲もここで決める
-│   │   ├── domain/         ER 図のテーブルそのままの型と、status の遷移ルール・キューの並び順。DB もロックも知らない
-│   │   └── repository/     外部とのやりとり全部。1パッケージで、ファイルで分ける
-│   │       ├── task.go など  Postgres の読み書き（テーブルごと）
-│   │       ├── tx.go       トランザクション・行ロックの仕組み
-│   │       ├── runner.go   AI の起動・resume のインターフェース
-│   │       ├── runner_claude.go  Claude 用の実装（AI を足すときは runner_<名前>.go）
-│   │       ├── github.go   CI・PR の状態
-│   │       └── git.go      worktree の作成・削除、remote の読み取り
-│   ├── migrations/         テーブル定義
-│   └── go.mod
-├── app/                    フロント（後回し）
-├── docs/design.md
-├── compose.yaml            Postgres
-└── .env.example
+├── api/
+│   ├── go.mod
+│   ├── go.sum
+│   ├── migrations/
+│   │   └── 0001_init.sql          全テーブルの作成
+│   └── src/
+│       ├── cmd/kobo/
+│       │   ├── main.go            組み立て、HTTP サーバーと worker の起動、停止
+│       │   └── config.go          設定の読み込み（DB、ポート、~/programF の場所、off_peak の時間帯、レビューの上限回数）
+│       │
+│       ├── controller/
+│       │   ├── iusecase/          controller が使う usecase のインターフェース
+│       │   │   ├── task.go
+│       │   │   ├── project.go
+│       │   │   ├── queue.go
+│       │   │   ├── completion.go
+│       │   │   ├── ci.go
+│       │   │   └── pr.go
+│       │   ├── rest/
+│       │   │   ├── router.go      URL とハンドラの対応表
+│       │   │   ├── task.go        /tasks 系（一覧・詳細・events・発行・編集・cancel・retry）
+│       │   │   ├── project.go     /projects
+│       │   │   ├── queue.go       /queue
+│       │   │   └── health.go      /health
+│       │   ├── mcp/
+│       │   │   ├── server.go      ツール名とハンドラの対応表
+│       │   │   ├── task.go        ユーザー向けのタスク系ツール
+│       │   │   ├── project.go     list_projects
+│       │   │   ├── queue.go       get_queue
+│       │   │   └── completion.go  AI 向け（complete_development / complete_review / report_blocked）
+│       │   └── worker/
+│       │       ├── queue.go       キューの取り出し（合図＋定期確認）
+│       │       ├── ci.go          CI のポーリング
+│       │       └── pr.go          PR のポーリング
+│       │
+│       ├── usecase/
+│       │   ├── irepository/       usecase が使う repository のインターフェース
+│       │   │   ├── task.go
+│       │   │   ├── project.go
+│       │   │   ├── session.go
+│       │   │   ├── pull_request.go
+│       │   │   ├── review_round.go
+│       │   │   ├── event.go
+│       │   │   ├── tx.go
+│       │   │   ├── runner.go      AI の起動・resume
+│       │   │   ├── github.go
+│       │   │   └── git.go
+│       │   ├── task.go            発行・一覧・詳細・編集・cancel・retry・実行フローの取得
+│       │   ├── project.go         一覧、ディレクトリ名からの登録
+│       │   ├── queue.go           次のタスクを取り出して実行する
+│       │   ├── completion.go      AI の完了通知・進められない報告の反映
+│       │   ├── ci.go              CI 結果の反映（成功 → reviewing、失敗 → fix、周回の判定）
+│       │   └── pr.go              マージ・クローズの反映
+│       │
+│       ├── domain/
+│       │   ├── task.go            Task、Status、Mode、status の遷移ルール
+│       │   ├── queue.go           キューの並び順
+│       │   ├── project.go
+│       │   ├── session.go
+│       │   ├── pull_request.go
+│       │   ├── review_round.go
+│       │   └── event.go
+│       │
+│       └── repository/            外部とのやりとり全部（1パッケージ）
+│           ├── postgres.go        DB 接続
+│           ├── tx.go              トランザクション・行ロック
+│           ├── task.go
+│           ├── project.go
+│           ├── session.go
+│           ├── pull_request.go
+│           ├── review_round.go
+│           ├── event.go
+│           ├── runner_claude.go   Claude 用の runner（AI を足すときは runner_<名前>.go）
+│           ├── github.go
+│           └── git.go
+│
+├── app/                           フロント（後回し）
+├── deploy/
+│   └── kobo.service               systemd のユニット
+├── docs/
+│   └── design.md
+├── compose.yaml                   Postgres
+├── .env.example
+├── .gitignore
+└── README.md
 ```
 
 ### 層のルール
 
 - クリーンアーキテクチャ。依存は controller → usecase → domain、usecase → repository（インターフェース）の向きだけ
 - インターフェースを付けるのは usecase と repository だけ。repository を偽物に替えれば、usecase のテストで DB・AI・GitHub が要らない
+- インターフェースは使う側の層に置く。usecase が使うものは `usecase/irepository/`、controller が使うものは `controller/iusecase/`。型名に `I` は付けない
 - DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
 - 層ごとに別のデータ型は作らない。domain の型を共有する
 - 厳密に分ける。読むだけの処理も usecase を通す
