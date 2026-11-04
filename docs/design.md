@@ -254,16 +254,18 @@ Kobo-13900K/
 │   ├── src/
 │   │   ├── cmd/kobo/       起動処理。各層を手で DI して組み立てる
 │   │   ├── controller/     入口
-│   │   │   ├── rest/       GUI からの HTTP
-│   │   │   ├── mcp/        AI からの MCP
+│   │   │   ├── rest/       GUI からの HTTP。router.go に URL とハンドラの対応表
+│   │   │   ├── mcp/        AI からの MCP。ツール名とハンドラの対応表も置く
 │   │   │   └── worker/     時間で動く入口（キューの取り出し、CI・PR のポーリング）
 │   │   ├── usecase/        やること。トランザクションとロックの範囲もここで決める
-│   │   ├── domain/         task と status の遷移ルール、キューの並び順。DB もロックも知らない
-│   │   └── repository/     外部とのやりとり全部
-│   │       ├── postgres/   DB。トランザクションや行ロックの仕組みを提供する
-│   │       ├── runner/     AI の起動・resume（claude/ に Claude 用の実装）
-│   │       ├── github/     CI・PR の状態
-│   │       └── git/        worktree の作成・削除、remote の読み取り
+│   │   ├── domain/         ER 図のテーブルそのままの型と、status の遷移ルール・キューの並び順。DB もロックも知らない
+│   │   └── repository/     外部とのやりとり全部。1パッケージで、ファイルで分ける
+│   │       ├── task.go など  Postgres の読み書き（テーブルごと）
+│   │       ├── tx.go       トランザクション・行ロックの仕組み
+│   │       ├── runner.go   AI の起動・resume のインターフェース
+│   │       ├── runner_claude.go  Claude 用の実装（AI を足すときは runner_<名前>.go）
+│   │       ├── github.go   CI・PR の状態
+│   │       └── git.go      worktree の作成・削除、remote の読み取り
 │   ├── migrations/         テーブル定義
 │   └── go.mod
 ├── app/                    フロント（後回し）
@@ -279,5 +281,7 @@ Kobo-13900K/
 - DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
 - 層ごとに別のデータ型は作らない。domain の型を共有する
 - 厳密に分ける。読むだけの処理も usecase を通す
+- 関数はすべて型のメソッドとして定義する。普通の関数はコンストラクタ（`New<型名>`）だけ
+- `main` は repository → usecase → controller の順にコンストラクタを呼んで組み立て、サーバーと worker を起動するだけ
 
 Go のバージョンは `go.mod` の `go` / `toolchain` で固定する。
