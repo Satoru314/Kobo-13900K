@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: kobo-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${KOBO_DB_USER:-kobo}
+      POSTGRES_PASSWORD: ${KOBO_DB_PASSWORD:-kobo}
+      POSTGRES_DB: ${KOBO_DB_NAME:-kobo}
+    ports:
+      - "127.0.0.1:${KOBO_DB_PORT:-5433}:5432"
+    volumes:
+      - kobo-db:/var/lib/postgresql/data
+
+volumes:
+  kobo-db:
