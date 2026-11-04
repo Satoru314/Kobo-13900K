@@ -25,6 +25,7 @@
 
 - MCP からのタスク発行（Claude アプリで話して発行）
 - 直列のキュー（レビュー対応を優先）
+- タスクごとの実行モード：すぐ実行するか、安い時間帯まで待つか
 - AI によるタスク実行と PR 作成
 - CI（GitHub Actions）とレビューのループ（最大2周）
 - GUI での状態一覧（見るだけ）。完成タスクには PR へのリンクを付ける
@@ -34,7 +35,7 @@
 
 - 実行中のタスクへの割り込み
 - GUI からのタスク発行
-- 時間帯やトークン予算を考えたスケジューリング
+- トークン予算を考えたスケジューリング（安い時間帯の判定を料金体系から自動で決めることも含む）
 - モデルの選択と、Claude 以外の AI
 - 通知、外部からのアクセス
 
@@ -66,7 +67,10 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 キュー専用のテーブルは持たず、task を並べたものをキューとみなす。
 
 - **対象**：status が `runnable` / `reviewing` / `fix` で、`running` でない task
-- **順番**：`fix` を先に取り出す。それ以外は `enqueued_at` の古い順
+- **順番**：`fix` → `immediate` → `off_peak`（安い時間帯の間だけ）。それぞれの中では `enqueued_at` の古い順
+- **実行モード**（`task.mode`）
+  - `immediate`：順番が来しだい実行する
+  - `off_peak`：安い時間帯になるまで待つ。安い時間帯は設定で時刻の範囲として決める（例: DeepSeek のオフピーク割引の時間帯）
 - `enqueued_at` は、上の status になってキューに入った時刻。キューの外にいる間は空
 - 割り込みはしない。実行中の task が終わってから次を取り出す
 
@@ -100,6 +104,7 @@ erDiagram
     text title
     text description
     enum status
+    enum mode "immediate / off_peak"
     bool running
     timestamp enqueued_at "nullable"
     timestamp created_at
