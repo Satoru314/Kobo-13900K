@@ -255,7 +255,7 @@ Kobo-13900K/
 │   │   ├── cmd/kobo/       起動処理。各層を手で DI して組み立てる
 │   │   ├── controller/     入口
 │   │   │   ├── rest/       GUI からの HTTP。router.go に URL とハンドラの対応表
-│   │   │   ├── mcp/        AI からの MCP。ツール名とハンドラの対応表も置く
+│   │   │   ├── mcp/        AI からの MCP。server.go にツール名とハンドラの対応表
 │   │   │   └── worker/     時間で動く入口（キューの取り出し、CI・PR のポーリング）
 │   │   ├── usecase/        やること。トランザクションとロックの範囲もここで決める
 │   │   ├── domain/         ER 図のテーブルそのままの型と、status の遷移ルール・キューの並び順。DB もロックも知らない
@@ -282,6 +282,22 @@ Kobo-13900K/
 - 層ごとに別のデータ型は作らない。domain の型を共有する
 - 厳密に分ける。読むだけの処理も usecase を通す
 - 関数はすべて型のメソッドとして定義する。普通の関数はコンストラクタ（`New<型名>`）だけ
-- `main` は repository → usecase → controller の順にコンストラクタを呼んで組み立て、サーバーと worker を起動するだけ
+- `main` の仕事
+  1. repository → usecase → controller の順にコンストラクタを呼んで組み立てる
+  2. `/mcp` を MCP のハンドラ、それ以外を REST のルーターに割り当て、1つの HTTP サーバーで起動する（rest と mcp は互いを知らない）
+  3. worker を goroutine で起動する
+  4. 終了の合図が来たら、全部をそろって止める
+
+### worker
+
+時間やきっかけで kobo が自分で動かす入口。何をいつ呼ぶかだけを決め、処理は usecase、GitHub とのやりとりは repository が行う。
+
+| worker | 内容 |
+|---|---|
+| キューの取り出し | 実行中の task がなければ次を取り出して AI に渡す。タスクの発行や AI の完了通知を合図にすぐ動き、定期的な確認は `off_peak` の時間帯に入ったことに気づくための保険 |
+| CI の確認 | `ci` の task の CI 結果をポーリングする |
+| PR の確認 | 完成した PR のマージ・クローズをポーリングして `finished` にする |
+
+最終的には、CI と PR の確認も GitHub の webhook を受けるイベント駆動に置き換えたい。
 
 Go のバージョンは `go.mod` の `go` / `toolchain` で固定する。
