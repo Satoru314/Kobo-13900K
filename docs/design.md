@@ -57,7 +57,7 @@ runnable → developing → ci → reviewing → done / unresolved → finished
 | `done` | 完成（レビュー通過） |
 | `unresolved` | 2周しても指摘が残った、または CI が通らなかった |
 | `finished` | PR がマージまたはクローズされた。一覧には出さない |
-| `error` | システムエラーで止まった。人が retry するまで動かない |
+| `error` | システムエラー、または AI が「進められない」と報告して止まった。人が retry するまで動かない |
 
 - `done` と `unresolved` は同じ一覧に PR リンク付きで並べ、status で見分ける
 - マージかクローズかの区別は `pull_request.state` で持つ
@@ -72,6 +72,11 @@ API エラー、利用枠の上限、push 失敗、完了通知なしでプロ�
 
 やり直した回数、エラー前の status、原因はすべて event から求める。task に列は足さない。
 `ci` の段階のエラー（GitHub の確認に失敗する等）は AI を使わないので、Kobo が自動で確認し直す。
+
+### AI が進められないと判断したとき
+
+AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無理がある、CI が落ちる原因がトークン切れなど外側にある）。
+自動の再実行はせず、すぐ `error` にする。理由は event に残す。人は原因を直すか、タスクを直してから retry する。
 
 ## キュー
 
@@ -113,7 +118,7 @@ GUI からは REST、Claude アプリからは同じ機能を MCP ツールと�
 | GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く |
 | GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
 | GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
-| PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`runnable` の間だけ |
+| PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`runnable` と `error` の間だけ |
 | POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`runnable` の間だけ（取り消し後の status は未決） |
 | POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
 | GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
@@ -126,6 +131,7 @@ GUI からは REST、Claude アプリからは同じ機能を MCP ツールと�
 |---|---|
 | `complete_development` | 開発・fix の完了通知。PR の URL と要約 |
 | `complete_review` | レビューの完了通知。approved / changes_requested と指摘 |
+| `report_blocked` | これ以上進められないことの報告。理由を添える。task は `error` になる |
 
 ### その他
 
