@@ -250,22 +250,34 @@ erDiagram
 
 ```
 Kobo-13900K/
-├── api/                  バックエンド（Go）
+├── api/                    バックエンド（Go）
 │   ├── src/
-│   │   ├── cmd/kobo/     起動処理
-│   │   ├── rest/         REST のハンドラ
-│   │   ├── mcp/          MCP ツール（ユーザー向け・AI 向け）
-│   │   ├── scheduler/    キューの取り出し
-│   │   ├── runner/       AI の起動・resume（claude/ に Claude 用の実装）
-│   │   ├── watcher/      CI・PR のポーリング
-│   │   ├── worktree/     git worktree の作成・削除
-│   │   └── store/        Postgres の読み書き
-│   ├── migrations/       テーブル定義
+│   │   ├── cmd/kobo/       起動処理。各層を手で DI して組み立てる
+│   │   ├── controller/     入口
+│   │   │   ├── rest/       GUI からの HTTP
+│   │   │   ├── mcp/        AI からの MCP
+│   │   │   └── worker/     時間で動く入口（キューの取り出し、CI・PR のポーリング）
+│   │   ├── usecase/        やること。トランザクションとロックの範囲もここで決める
+│   │   ├── domain/         task と status の遷移ルール、キューの並び順。DB もロックも知らない
+│   │   └── repository/     外部とのやりとり全部
+│   │       ├── postgres/   DB。トランザクションや行ロックの仕組みを提供する
+│   │       ├── runner/     AI の起動・resume（claude/ に Claude 用の実装）
+│   │       ├── github/     CI・PR の状態
+│   │       └── git/        worktree の作成・削除、remote の読み取り
+│   ├── migrations/         テーブル定義
 │   └── go.mod
-├── app/                  フロント（後回し）
+├── app/                    フロント（後回し）
 ├── docs/design.md
-├── compose.yaml          Postgres
+├── compose.yaml            Postgres
 └── .env.example
 ```
+
+### 層のルール
+
+- クリーンアーキテクチャ。依存は controller → usecase → domain、usecase → repository（インターフェース）の向きだけ
+- インターフェースを付けるのは usecase と repository だけ。repository を偽物に替えれば、usecase のテストで DB・AI・GitHub が要らない
+- DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
+- 層ごとに別のデータ型は作らない。domain の型を共有する
+- 厳密に分ける。読むだけの処理も usecase を通す
 
 Go のバージョンは `go.mod` の `go` / `toolchain` で固定する。
