@@ -17,13 +17,13 @@
 - **直列で実行する**：トークンを使いすぎないように、タスクは並列にせずキューで1つずつ処理する
 - **AI を差し替えられるようにする**：当面は開発もレビューも Claude だが、役割ごとに別の AI に替えられる作りにする
 - **対象リポジトリは区別しない**：どのリポジトリも同じように扱う
-- **セルフホスト**：Go で書いたサーバーを Docker で動かし、MCP サーバーとしても公開する
+- **セルフホスト**：Go で書いたサーバーを CT102 で動かし、MCP サーバーとしても公開する
 
 ## MVP
 
 ### 入れるもの
 
-- MCP からのタスク発行（Claude アプリで話して発行）
+- MCP からのタスク発行（MVP では Claude Code から。操作はすべて AI 経由）
 - 直列のキュー（レビュー対応を優先）
 - タスクごとの実行モード：すぐ実行するか、安い時間帯まで待つか
 - AI によるタスク実行と PR 作成
@@ -109,7 +109,7 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 
 ### ユーザー向け
 
-GUI からは REST、Claude アプリからは同じ機能を MCP ツールとして呼ぶ。
+GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツールとして呼ぶ。
 
 | メソッド | パス | MCP ツール | 内容 |
 |---|---|---|---|
@@ -220,7 +220,52 @@ erDiagram
 
 ## インフラ
 
-- サーバー：Go
-- DB：PostgreSQL
-- Docker で動かす。Proxmox の LXC に置く場合は nesting を有効にする
-- 置き場所：CT102（開発環境）
+```
+ Claude Code ──MCP──┐
+ ブラウザ (GUI) ─HTTP┤
+                    ▼
+ ┌──────────────── CT102 ────────────────────────┐
+ │ kobo (Go, systemd で常駐)                      │
+ │  ├ rest / mcp  REST と MCP の受け口            │
+ │  ├ scheduler   キューから次の task を取り出す  │
+ │  ├ runner      AI を起動・resume する          │──▶ claude CLI（satoru314 として実行）
+ │  ├ watcher     CI と PR の状態をポーリング     │──▶ GitHub
+ │  └ worktree    worktree の作成・削除           │──▶ ~/programF 配下
+ │ postgres (Docker)                              │
+ └────────────────────────────────────────────────┘
+```
+
+- **kobo**：CT102 の上で直接動かす。本番は systemd のサービス、開発中は `go run`
+- **AI**：CT102 の上で satoru314 として動かす。普段の開発環境のツールがそのまま使える。完了通知は localhost の MCP で kobo に返す
+- **DB**：PostgreSQL を Docker で動かす。`compose.yaml` は Postgres 用だけ
+- **runner** は AI ごとに差し替える部品。「タスクを渡して起動」「resume」「完了通知を待つ」だけを決め、Claude 用はその実装の1つ
+- **ネットワーク**：LAN 内だけ。claude.ai のカスタムコネクタは Anthropic のサーバーから接続するため LAN 内の MCP には届かない。Claude アプリから使うには外への公開と認証が必要（後回し）
+
+### 準備が要ること
+
+- CT102 の satoru314 を docker グループに入れる（root が必要）
+- CT102 で Docker を動かすため、CT の nesting が有効か確認する
+
+## ファイル配置
+
+```
+Kobo-13900K/
+├── api/                  バックエンド（Go）
+│   ├── src/
+│   │   ├── cmd/kobo/     起動処理
+│   │   ├── rest/         REST のハンドラ
+│   │   ├── mcp/          MCP ツール（ユーザー向け・AI 向け）
+│   │   ├── scheduler/    キューの取り出し
+│   │   ├── runner/       AI の起動・resume（claude/ に Claude 用の実装）
+│   │   ├── watcher/      CI・PR のポーリング
+│   │   ├── worktree/     git worktree の作成・削除
+│   │   └── store/        Postgres の読み書き
+│   ├── migrations/       テーブル定義
+│   └── go.mod
+├── app/                  フロント（後回し）
+├── docs/design.md
+├── compose.yaml          Postgres
+└── .env.example
+```
+
+Go のバージョンは `go.mod` の `go` / `toolchain` で固定する。
