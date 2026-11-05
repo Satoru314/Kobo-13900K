@@ -100,7 +100,7 @@ func TestRunPassesHeadlessChromiumAndInstallsItOnce(t *testing.T) {
 	npx := e.fakeNpx(tools, "0")
 
 	servers := e.run()
-	if _, ok := servers["kobo"]; !ok {
+	if _, ok := servers["kobo-agent"]; !ok {
 		t.Errorf("the agent server is missing: %v", servers)
 	}
 	pw, ok := servers["playwright"]
@@ -152,7 +152,7 @@ export PATH="` + nodeBin + `:$PATH"
 func TestRunGoesOnWithoutBrowserWhenNpxIsMissing(t *testing.T) {
 	e := newRunnerEnv(t)
 	servers := e.run()
-	if _, ok := servers["kobo"]; !ok {
+	if _, ok := servers["kobo-agent"]; !ok {
 		t.Errorf("the agent server is missing: %v", servers)
 	}
 	if _, ok := servers["playwright"]; ok {
