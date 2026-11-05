@@ -20,13 +20,13 @@
       "id": "deepseek-v4.1-flash-free",
       "label": "DeepSeek V4.1 Flash (無料)",
       "provider": "opencode",
-      "model": "opencode/deepseek-v4.1-flash-free"
+      "model": "opencode/deepseek-v4.1-flash-free#max"
     },
     {
       "id": "deepseek-v4.1-flash",
       "label": "DeepSeek V4.1 Flash",
       "provider": "opencode",
-      "model": "opencode-go/deepseek-v4.1-flash"
+      "model": "opencode-go/deepseek-v4.1-flash#max"
     }
   ]
 }
