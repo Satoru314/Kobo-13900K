@@ -7,6 +7,7 @@ import (
 )
 
 type ProjectRepository interface {
+	// Create inserts p. When the dir is already registered, p becomes the registered project.
 	Create(ctx context.Context, p *domain.Project) error
 	Get(ctx context.Context, id int64) (domain.Project, error)
 	GetByDir(ctx context.Context, dir string) (domain.Project, error)

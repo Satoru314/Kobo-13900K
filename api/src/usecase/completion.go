@@ -40,7 +40,7 @@ func NewCompletionUsecase(tx irepository.Transactor, tasks irepository.TaskRepos
 	return &CompletionUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events,
 		projects: projects, git: git, settings: settings, active: active, signal: signal, changes: changes,
 		track: newTracker(tasks, events),
-		book: newRoundBook(rounds, newTracker(tasks, events))}
+		book:  newRoundBook(rounds, newTracker(tasks, events))}
 }
 
 // running returns the running task, locked.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -76,7 +77,9 @@ func run() error {
 		mcp.NewQueueTools(queueUC), mcp.NewCompletionTools(completionUC))
 	mux.Handle("/mcp", mcpServer.UserHandler())
 	mux.Handle("/mcp/agent", mcpServer.AgentHandler())
-	srv := &http.Server{Addr: cfg.Listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// Requests share ctx, so open /events streams end when kobo shuts down instead of holding Shutdown.
+	srv := &http.Server{Addr: cfg.Listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return ctx }}
 
 	var wg sync.WaitGroup
 	for _, w := range []interface{ Run(context.Context) }{

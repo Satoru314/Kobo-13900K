@@ -24,10 +24,18 @@ func (r *ProjectRepository) scan(row pgx.Row) (domain.Project, error) {
 	return p, err
 }
 
+// Create inserts p. When another request registered the same dir first, p becomes that project.
 func (r *ProjectRepository) Create(ctx context.Context, p *domain.Project) error {
-	return r.pg.conn(ctx).QueryRow(ctx, `INSERT INTO project (dir, owner, name, default_branch, created_at)
-		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		p.Dir, p.Owner, p.Name, p.DefaultBranch, p.CreatedAt).Scan(&p.ID)
+	saved, err := r.scan(r.pg.conn(ctx).QueryRow(ctx, `INSERT INTO project (dir, owner, name, default_branch, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (dir) DO UPDATE SET dir = EXCLUDED.dir
+		RETURNING `+projectColumns,
+		p.Dir, p.Owner, p.Name, p.DefaultBranch, p.CreatedAt))
+	if err != nil {
+		return err
+	}
+	*p = saved
+	return nil
 }
 
 func (r *ProjectRepository) Get(ctx context.Context, id int64) (domain.Project, error) {

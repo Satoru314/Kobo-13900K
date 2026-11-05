@@ -168,6 +168,15 @@ function Card({ task, bottom, open, visor }: { task: TaskSummary; bottom: string
   );
 }
 
+function Spinner({ color }: { color: string }) {
+  return (
+    <svg className="spin" width="14" height="14" viewBox="0 0 16 16" aria-label="処理中" style={{ display: 'block' }}>
+      <circle cx="8" cy="8" r="6" stroke={color} strokeOpacity="0.25" strokeWidth="2" fill="none" />
+      <path d="M8 2a6 6 0 0 1 6 6" stroke={color} strokeWidth="2" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
 const PROBLEMS: Record<NonNullable<Candidate['problem']>, string> = { not_git: 'git ではない', not_github: 'GitHub ではない' };
 
 function Composer() {
@@ -182,6 +191,13 @@ function Composer() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
+  // a request in flight; buttons that would send another are disabled until it ends
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState('');
+  const send = (request: () => Promise<unknown>) => {
+    setBusy(true);
+    request().then(() => setError(''), (e: Error) => setError(e.message)).finally(() => setBusy(false));
+  };
 
   const loadProjects = useCallback(() => api.projects().then(setProjects, (e: Error) => setError(e.message)), []);
   useEffect(() => { loadProjects(); }, [loadProjects]);
@@ -189,15 +205,14 @@ function Composer() {
 
   const choose = (dir: string) => { setProject(dir); store('kobo.project', dir); };
   const openPicker = () => api.candidates().then(setCandidates, (e: Error) => setError(e.message));
-  const add = (dir: string) =>
-    api.addProject(dir).then(() => { setCandidates(null); choose(dir); return loadProjects(); }, (e: Error) => setError(e.message));
+  const add = (dir: string) => {
+    setAdding(dir);
+    send(() => api.addProject(dir).then(() => { setCandidates(null); choose(dir); return loadProjects(); }).finally(() => setAdding('')));
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    api.create(current, title, description, mode).then(
-      () => { setTitle(''); setDescription(''); setError(''); },
-      (err: Error) => setError(err.message),
-    );
+    send(() => api.create(current, title, description, mode).then(() => { setTitle(''); setDescription(''); }));
   };
 
   const sorted = (candidates ?? []).map((c) => ({ ...c, rank: c.registered ? 2 : c.problem ? 1 : 0 }))
@@ -217,9 +232,9 @@ function Composer() {
                 const disabled = c.registered || !!c.problem;
                 return (
                   <li key={c.dir}>
-                    <button type="button" className="ghost" disabled={disabled} onClick={() => add(c.dir)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: 'none', background: 'transparent', fontFamily: 'inherit', textAlign: 'left', cursor: disabled ? 'default' : 'pointer' }}>
+                    <button type="button" className="ghost" disabled={disabled || busy} onClick={() => add(c.dir)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: 'none', background: 'transparent', fontFamily: 'inherit', textAlign: 'left', cursor: disabled ? 'default' : 'pointer' }}>
                       <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 500, color: disabled ? '#8a8780' : '#1f1e1b' }}>{c.dir}/</span>
-                      <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 500, color: c.problem ? '#b4441c' : '#6b6964' }}>{c.registered ? '登録済み' : c.problem ? PROBLEMS[c.problem] : ''}</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 500, color: c.problem ? '#b4441c' : '#6b6964' }}>{c.registered ? '登録済み' : c.problem ? PROBLEMS[c.problem] : ''}{adding === c.dir && <Spinner color="#1f1e1b" />}</span>
                     </button>
                   </li>
                 );
@@ -257,8 +272,10 @@ function Composer() {
                 </ul>
               )}
             </div>
-            <button type="submit" className="btn btn-primary" aria-label="発行" style={{ width: 34, height: 34, border: 'none', background: '#1f1e1b', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
+            <button type="submit" className="btn btn-primary" aria-label="発行" disabled={busy} style={{ width: 34, height: 34, border: 'none', background: '#1f1e1b', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {busy && !adding
+                ? <Spinner color="#ffffff" />
+                : <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" stroke="#ffffff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>}
             </button>
           </div>
         </form>
@@ -332,7 +349,11 @@ function Detail({ id, version, close }: { id: number; version: number; close: ()
     );
   }, [id, version]);
 
-  const act = (call: (id: number) => Promise<unknown>) => call(id).then(close, (e: Error) => setError(e.message));
+  const [busy, setBusy] = useState(false);
+  const act = (call: (id: number) => Promise<unknown>) => {
+    setBusy(true);
+    call(id).then(close, (e: Error) => { setError(e.message); setBusy(false); });
+  };
   const t = detail?.task;
 
   return (
@@ -366,10 +387,10 @@ function Detail({ id, version, close }: { id: number; version: number; close: ()
             {(t.status === 'error' || t.status === 'develop') && (
               <div style={{ display: 'flex', gap: 8 }}>
                 {t.status === 'error' && (
-                  <button type="button" className="btn btn-primary" onClick={() => act(api.retry)} style={{ height: 32, padding: '0 14px', border: 'none', background: '#1f1e1b', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#ffffff', cursor: 'pointer' }}>再実行</button>
+                  <button type="button" className="btn btn-primary" onClick={() => act(api.retry)} disabled={busy} style={{ height: 32, padding: '0 14px', border: 'none', background: '#1f1e1b', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#ffffff', cursor: 'pointer' }}>再実行</button>
                 )}
                 {t.status === 'develop' && (
-                  <button type="button" className="ghost" onClick={() => act(api.cancel)} style={{ height: 32, padding: '0 14px', border: BORDER, background: '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', cursor: 'pointer' }}>取り消し</button>
+                  <button type="button" className="ghost" onClick={() => act(api.cancel)} disabled={busy} style={{ height: 32, padding: '0 14px', border: BORDER, background: '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', cursor: 'pointer' }}>取り消し</button>
                 )}
               </div>
             )}

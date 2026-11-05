@@ -11,3 +11,5 @@ a{color:#1f63b8}a:hover{color:#164a8a}
 .bare:focus{outline:none}
 .bare::placeholder{color:#8a8780}
 .noscroll{scrollbar-width:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin .8s linear infinite}
