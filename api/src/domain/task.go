@@ -11,11 +11,13 @@ import (
 type Status string
 
 const (
-	StatusRunnable   Status = "runnable"
+	StatusDevelop    Status = "develop"
 	StatusDeveloping Status = "developing"
 	StatusCI         Status = "ci"
+	StatusReview     Status = "review"
 	StatusReviewing  Status = "reviewing"
 	StatusFix        Status = "fix"
+	StatusFixing     Status = "fixing"
 	StatusDone       Status = "done"
 	StatusUnresolved Status = "unresolved"
 	StatusError      Status = "error"
@@ -25,17 +27,32 @@ const (
 
 // transitions lists every status a task may move to from a given status.
 var transitions = map[Status][]Status{
-	StatusRunnable:   {StatusDeveloping, StatusCancelled},
-	StatusDeveloping: {StatusCI, StatusReviewing, StatusRunnable, StatusError},
-	StatusCI:         {StatusReviewing, StatusFix, StatusUnresolved, StatusFinished},
-	StatusReviewing:  {StatusDone, StatusFix, StatusUnresolved, StatusError, StatusFinished},
-	StatusFix:        {StatusCI, StatusReviewing, StatusError, StatusFinished},
+	StatusDevelop:    {StatusDeveloping, StatusCancelled},
+	StatusDeveloping: {StatusCI, StatusReview, StatusDevelop, StatusError},
+	StatusCI:         {StatusReview, StatusFix, StatusUnresolved, StatusFinished},
+	StatusReview:     {StatusReviewing, StatusFinished},
+	StatusReviewing:  {StatusDone, StatusFix, StatusUnresolved, StatusReview, StatusError},
+	StatusFix:        {StatusFixing, StatusFinished},
+	StatusFixing:     {StatusCI, StatusReview, StatusFix, StatusError},
 	StatusDone:       {StatusFinished},
 	StatusUnresolved: {StatusFinished},
-	StatusError:      {StatusRunnable, StatusReviewing, StatusFix, StatusFinished},
+	StatusError:      {StatusDevelop, StatusReview, StatusFix, StatusFinished},
+}
+
+// runs pairs each waiting status with the status the task is in while the AI works on it.
+var runs = map[Status]Status{
+	StatusDevelop: StatusDeveloping,
+	StatusReview:  StatusReviewing,
+	StatusFix:     StatusFixing,
 }
 
 var ErrInvalidTransition = errors.New("invalid status transition")
+
+// WaitingStatuses are the statuses a task waits in the queue for the AI.
+var WaitingStatuses = []Status{StatusDevelop, StatusReview, StatusFix}
+
+// RunningStatuses are the statuses a task is in while the AI works on it.
+var RunningStatuses = []Status{StatusDeveloping, StatusReviewing, StatusFixing}
 
 // Valid reports whether s is a known status.
 func (s Status) Valid() bool {
@@ -43,9 +60,14 @@ func (s Status) Valid() bool {
 	return ok || s == StatusCancelled || s == StatusFinished
 }
 
-// Queued reports whether a task in this status waits in the queue for the AI.
-func (s Status) Queued() bool {
-	return s == StatusRunnable || s == StatusReviewing || s == StatusFix
+// Waiting reports whether a task in this status waits in the queue for the AI.
+func (s Status) Waiting() bool {
+	return slices.Contains(WaitingStatuses, s)
+}
+
+// Running reports whether the AI is working on a task in this status.
+func (s Status) Running() bool {
+	return slices.Contains(RunningStatuses, s)
 }
 
 // Hidden reports whether a task in this status is left out of the default list.
@@ -53,10 +75,13 @@ func (s Status) Hidden() bool {
 	return s == StatusFinished || s == StatusCancelled
 }
 
-// QueueStatus is the status a task returns to when its run has to be repeated.
-func (s Status) QueueStatus() Status {
-	if s == StatusDeveloping {
-		return StatusRunnable
+// WaitingStatus is the status a task returns to when its run has to be repeated.
+// It is s itself for statuses that are not running.
+func (s Status) WaitingStatus() Status {
+	for waiting, running := range runs {
+		if running == s {
+			return waiting
+		}
 	}
 	return s
 }
@@ -69,12 +94,13 @@ func (s Status) CanMoveTo(next Status) bool {
 type Mode string
 
 const (
+	ModePriority  Mode = "priority"
 	ModeImmediate Mode = "immediate"
 	ModeOffPeak   Mode = "off_peak"
 )
 
 func (m Mode) Valid() bool {
-	return m == ModeImmediate || m == ModeOffPeak
+	return m == ModePriority || m == ModeImmediate || m == ModeOffPeak
 }
 
 type Task struct {
@@ -84,7 +110,6 @@ type Task struct {
 	Description string     `json:"description"`
 	Status      Status     `json:"status"`
 	Mode        Mode       `json:"mode"`
-	Running     bool       `json:"running"`
 	EnqueuedAt  *time.Time `json:"enqueued_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
@@ -102,7 +127,7 @@ func NewTask(projectID int64, title, description string, mode Mode, now time.Tim
 		ProjectID:   projectID,
 		Title:       title,
 		Description: description,
-		Status:      StatusRunnable,
+		Status:      StatusDevelop,
 		Mode:        mode,
 		EnqueuedAt:  &now,
 		CreatedAt:   now,
@@ -110,31 +135,28 @@ func NewTask(projectID int64, title, description string, mode Mode, now time.Tim
 	}, nil
 }
 
-// MoveTo changes the status. The task stops running, and enters the queue when
-// the new status is a queued one.
+// MoveTo changes the status, and puts the task in the queue when the new
+// status is a waiting one.
 func (t *Task) MoveTo(next Status, now time.Time) error {
 	if !t.Status.CanMoveTo(next) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.Status, next)
 	}
 	t.Status = next
-	t.Running = false
 	t.EnqueuedAt = nil
-	if next.Queued() {
+	if next.Waiting() {
 		t.EnqueuedAt = &now
 	}
 	t.UpdatedAt = now
 	return nil
 }
 
-// Start marks the task as taken out of the queue and handed to the AI.
+// Start takes the task out of the queue and hands it to the AI.
 func (t *Task) Start(now time.Time) error {
-	if !t.Status.Queued() || t.Running {
+	running, ok := runs[t.Status]
+	if !ok {
 		return fmt.Errorf("%w: task %d in %s cannot start", ErrInvalidTransition, t.ID, t.Status)
 	}
-	if t.Status == StatusRunnable {
-		t.Status = StatusDeveloping
-	}
-	t.Running = true
+	t.Status = running
 	t.EnqueuedAt = nil
 	t.UpdatedAt = now
 	return nil
@@ -143,12 +165,10 @@ func (t *Task) Start(now time.Time) error {
 // Requeue puts a task whose run failed back into the queue, to be taken out
 // again no earlier than at.
 func (t *Task) Requeue(at, now time.Time) error {
-	back := t.Status.QueueStatus()
-	if back != t.Status && !t.Status.CanMoveTo(back) {
-		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, t.Status, back)
+	if !t.Status.Running() {
+		return fmt.Errorf("%w: task %d in %s is not running", ErrInvalidTransition, t.ID, t.Status)
 	}
-	t.Status = back
-	t.Running = false
+	t.Status = t.Status.WaitingStatus()
 	t.EnqueuedAt = &at
 	t.UpdatedAt = now
 	return nil
@@ -156,7 +176,7 @@ func (t *Task) Requeue(at, now time.Time) error {
 
 // Editable reports whether the user may still change the task's content.
 func (t Task) Editable() bool {
-	return t.Status == StatusRunnable || t.Status == StatusError
+	return t.Status == StatusDevelop || t.Status == StatusError
 }
 
 // Edit replaces the content fields that are set.

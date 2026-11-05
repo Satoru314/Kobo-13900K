@@ -26,39 +26,53 @@ func TestNewTaskValidates(t *testing.T) {
 		t.Error("unknown mode accepted")
 	}
 	task := newTestTask(t)
-	if task.Status != StatusRunnable || task.EnqueuedAt == nil || !task.EnqueuedAt.Equal(t0) {
-		t.Errorf("new task = %+v, want runnable and enqueued at t0", task)
+	if task.Status != StatusDevelop || task.EnqueuedAt == nil || !task.EnqueuedAt.Equal(t0) {
+		t.Errorf("new task = %+v, want develop and enqueued at t0", task)
 	}
 }
 
 func TestFullLifecycle(t *testing.T) {
 	task := newTestTask(t)
-	steps := []Status{StatusCI, StatusFix, StatusCI, StatusReviewing, StatusDone, StatusFinished}
-	if err := task.Start(t0); err != nil {
-		t.Fatal(err)
+	start := func() {
+		t.Helper()
+		if err := task.Start(t0); err != nil {
+			t.Fatal(err)
+		}
+		if !task.Status.Running() || task.EnqueuedAt != nil {
+			t.Fatalf("after start = %+v", task)
+		}
 	}
-	if task.Status != StatusDeveloping || !task.Running || task.EnqueuedAt != nil {
-		t.Fatalf("after start = %+v", task)
-	}
-	for _, s := range steps {
+	move := func(s Status) {
+		t.Helper()
 		if err := task.MoveTo(s, t0); err != nil {
 			t.Fatalf("move to %s: %v", s, err)
 		}
-		if got := task.EnqueuedAt != nil; got != s.Queued() {
-			t.Errorf("%s: enqueued=%v, want %v", s, got, s.Queued())
+		if got := task.EnqueuedAt != nil; got != s.Waiting() {
+			t.Errorf("%s: enqueued=%v, want %v", s, got, s.Waiting())
 		}
 	}
+	start() // developing
+	move(StatusCI)
+	move(StatusFix)
+	start() // fixing
+	move(StatusCI)
+	move(StatusReview)
+	start() // reviewing
+	move(StatusDone)
+	move(StatusFinished)
 }
 
 func TestInvalidTransitions(t *testing.T) {
 	cases := []struct{ from, to Status }{
-		{StatusRunnable, StatusDone},
+		{StatusDevelop, StatusDone},
 		{StatusDeveloping, StatusDone},
 		{StatusCI, StatusDone},
 		{StatusDone, StatusFix},
-		{StatusFinished, StatusRunnable},
-		{StatusCancelled, StatusRunnable},
-		{StatusReviewing, StatusCancelled},
+		{StatusFinished, StatusDevelop},
+		{StatusCancelled, StatusDevelop},
+		{StatusReview, StatusCancelled},
+		{StatusReviewing, StatusFinished},
+		{StatusFixing, StatusFinished},
 	}
 	for _, c := range cases {
 		task := Task{Status: c.from}
@@ -68,17 +82,21 @@ func TestInvalidTransitions(t *testing.T) {
 	}
 }
 
-func TestStartKeepsReviewAndFixStatus(t *testing.T) {
-	for _, s := range []Status{StatusReviewing, StatusFix} {
-		task := Task{Status: s, EnqueuedAt: &t0}
+func TestStart(t *testing.T) {
+	for from, want := range map[Status]Status{
+		StatusDevelop: StatusDeveloping,
+		StatusReview:  StatusReviewing,
+		StatusFix:     StatusFixing,
+	} {
+		task := Task{Status: from, EnqueuedAt: &t0}
 		if err := task.Start(t0); err != nil {
 			t.Fatal(err)
 		}
-		if task.Status != s || !task.Running {
-			t.Errorf("start from %s = %+v", s, task)
+		if task.Status != want || task.EnqueuedAt != nil {
+			t.Errorf("start from %s = %+v", from, task)
 		}
 		if err := task.Start(t0); err == nil {
-			t.Errorf("%s: started twice", s)
+			t.Errorf("%s: started twice", from)
 		}
 	}
 	task := Task{Status: StatusDone}
@@ -89,21 +107,22 @@ func TestStartKeepsReviewAndFixStatus(t *testing.T) {
 
 func TestRequeue(t *testing.T) {
 	later := t0.Add(time.Minute)
-	task := newTestTask(t)
-	_ = task.Start(t0)
-	if err := task.Requeue(later, t0); err != nil {
-		t.Fatal(err)
+	for from, want := range map[Status]Status{
+		StatusDeveloping: StatusDevelop,
+		StatusReviewing:  StatusReview,
+		StatusFixing:     StatusFix,
+	} {
+		task := Task{Status: from}
+		if err := task.Requeue(later, t0); err != nil {
+			t.Fatal(err)
+		}
+		if task.Status != want || !task.EnqueuedAt.Equal(later) {
+			t.Errorf("requeue from %s = %+v", from, task)
+		}
 	}
-	if task.Status != StatusRunnable || task.Running || !task.EnqueuedAt.Equal(later) {
-		t.Errorf("requeue from developing = %+v", task)
-	}
-
-	fix := Task{Status: StatusFix, Running: true}
-	if err := fix.Requeue(later, t0); err != nil {
-		t.Fatal(err)
-	}
-	if fix.Status != StatusFix || fix.Running {
-		t.Errorf("requeue from fix = %+v", fix)
+	task := Task{Status: StatusFix}
+	if err := task.Requeue(later, t0); err == nil {
+		t.Error("requeued a task that is not running")
 	}
 }
 
@@ -111,9 +130,9 @@ func TestEdit(t *testing.T) {
 	task := newTestTask(t)
 	title := "new"
 	if err := task.Edit(&title, nil, nil, t0); err != nil || task.Title != "new" || task.Description != "body" {
-		t.Errorf("edit runnable: %v %+v", err, task)
+		t.Errorf("edit develop: %v %+v", err, task)
 	}
-	task.Status = StatusReviewing
+	task.Status = StatusReview
 	if err := task.Edit(&title, nil, nil, t0); err == nil {
 		t.Error("edited a task under review")
 	}

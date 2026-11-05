@@ -42,16 +42,17 @@ func TestOffPeakWindow(t *testing.T) {
 
 func TestQueueOrder(t *testing.T) {
 	tasks := []Task{
-		{ID: 1, Status: StatusRunnable, Mode: ModeOffPeak, EnqueuedAt: at(0)},
-		{ID: 2, Status: StatusRunnable, Mode: ModeImmediate, EnqueuedAt: at(5)},
-		{ID: 3, Status: StatusReviewing, Mode: ModeImmediate, EnqueuedAt: at(9)},
+		{ID: 1, Status: StatusDevelop, Mode: ModeOffPeak, EnqueuedAt: at(0)},
+		{ID: 2, Status: StatusDevelop, Mode: ModeImmediate, EnqueuedAt: at(5)},
+		{ID: 3, Status: StatusReview, Mode: ModeImmediate, EnqueuedAt: at(9)},
 		{ID: 4, Status: StatusFix, Mode: ModeOffPeak, EnqueuedAt: at(10)},
-		{ID: 5, Status: StatusRunnable, Mode: ModeImmediate, EnqueuedAt: at(1)},
-		{ID: 6, Status: StatusFix, Running: true, EnqueuedAt: at(0)},
+		{ID: 5, Status: StatusDevelop, Mode: ModeImmediate, EnqueuedAt: at(1)},
+		{ID: 6, Status: StatusFixing},
 		{ID: 7, Status: StatusDone},
+		{ID: 8, Status: StatusDevelop, Mode: ModePriority, EnqueuedAt: at(20)},
 	}
 	got := Queue{}.Order(tasks)
-	want := []int64{4, 3, 5, 2, 1}
+	want := []int64{4, 3, 8, 5, 2, 1}
 	if len(got) != len(want) {
 		t.Fatalf("order = %v", got)
 	}
@@ -68,7 +69,7 @@ func TestQueueNext(t *testing.T) {
 	noon := t0                                            // 12:00, outside the window
 	night := time.Date(2026, 11, 5, 2, 0, 0, 0, time.UTC) // inside
 
-	offPeak := Task{ID: 1, Status: StatusRunnable, Mode: ModeOffPeak, EnqueuedAt: at(0)}
+	offPeak := Task{ID: 1, Status: StatusDevelop, Mode: ModeOffPeak, EnqueuedAt: at(0)}
 	if _, ok := q.Next([]Task{offPeak}, noon); ok {
 		t.Error("off_peak task ran outside the window")
 	}
@@ -81,13 +82,17 @@ func TestQueueNext(t *testing.T) {
 		t.Error("fix of an off_peak task was held back")
 	}
 
-	future := Task{ID: 3, Status: StatusRunnable, Mode: ModeImmediate, EnqueuedAt: at(30)}
+	future := Task{ID: 3, Status: StatusDevelop, Mode: ModeImmediate, EnqueuedAt: at(30)}
 	if _, ok := q.Next([]Task{future}, noon); ok {
 		t.Error("task ran before its enqueued_at")
 	}
 	waiting := Task{ID: 4, Status: StatusFix, EnqueuedAt: at(30)}
-	ready := Task{ID: 5, Status: StatusRunnable, Mode: ModeImmediate, EnqueuedAt: at(0)}
+	ready := Task{ID: 5, Status: StatusDevelop, Mode: ModeImmediate, EnqueuedAt: at(0)}
 	if got, ok := q.Next([]Task{waiting, ready}, noon); !ok || got.ID != 5 {
 		t.Errorf("waiting fix blocked a ready task: %+v %v", got, ok)
+	}
+	priority := Task{ID: 6, Status: StatusDevelop, Mode: ModePriority, EnqueuedAt: at(0)}
+	if got, ok := q.Next([]Task{ready, priority}, noon); !ok || got.ID != 6 {
+		t.Errorf("priority task did not go first: %+v %v", got, ok)
 	}
 }

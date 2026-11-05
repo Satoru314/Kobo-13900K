@@ -10,8 +10,8 @@ import (
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
-// openStatuses are the statuses a task with an open PR can be in.
-var openStatuses = []domain.Status{domain.StatusCI, domain.StatusReviewing, domain.StatusFix,
+// openStatuses are the statuses a task with an open PR can be in while the AI is not working on it.
+var openStatuses = []domain.Status{domain.StatusCI, domain.StatusReview, domain.StatusFix,
 	domain.StatusDone, domain.StatusUnresolved, domain.StatusError}
 
 type PRUsecase struct {
@@ -37,9 +37,6 @@ func (u *PRUsecase) Check(ctx context.Context, now time.Time) error {
 	}
 	var errs []error
 	for _, t := range tasks {
-		if t.Running {
-			continue
-		}
 		if err := u.checkTask(ctx, t, now); err != nil {
 			errs = append(errs, fmt.Errorf("task %d: %w", t.ID, err))
 		}
@@ -68,7 +65,7 @@ func (u *PRUsecase) checkTask(ctx context.Context, task domain.Task, now time.Ti
 	}
 	return u.tx.InTx(ctx, func(ctx context.Context) error {
 		task, err := u.tasks.GetForUpdate(ctx, task.ID)
-		if err != nil || task.Running || !task.Status.CanMoveTo(domain.StatusFinished) {
+		if err != nil || !task.Status.CanMoveTo(domain.StatusFinished) {
 			return err
 		}
 		pr.State, pr.MergedAt = info.State, info.MergedAt

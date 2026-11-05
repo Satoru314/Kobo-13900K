@@ -43,12 +43,12 @@ func NewCompletionUsecase(tx irepository.Transactor, tasks irepository.TaskRepos
 
 // running returns the running task, locked.
 func (u *CompletionUsecase) running(ctx context.Context) (domain.Task, error) {
-	tasks, err := u.tasks.List(ctx, queueStatuses...)
+	tasks, err := u.tasks.List(ctx, domain.RunningStatuses...)
 	if err != nil {
 		return domain.Task{}, err
 	}
 	for _, t := range tasks {
-		if t.Running {
+		if t.Status.Running() {
 			return u.tasks.GetForUpdate(ctx, t.ID)
 		}
 	}
@@ -84,7 +84,7 @@ func (u *CompletionUsecase) CompleteDevelopment(ctx context.Context, in Complete
 		if task, err = u.running(ctx); err != nil {
 			return err
 		}
-		if task.Status != domain.StatusDeveloping && task.Status != domain.StatusFix {
+		if task.Status != domain.StatusDeveloping && task.Status != domain.StatusFixing {
 			return fmt.Errorf("%w: task %d is %s; complete_development is for development and fixes", ErrInvalidInput, task.ID, task.Status)
 		}
 		sid := u.sessionID(ctx, task, domain.RoleDev)
@@ -105,7 +105,7 @@ func (u *CompletionUsecase) CompleteDevelopment(ctx context.Context, in Complete
 		if err != nil {
 			return fmt.Errorf("check for CI workflows: %w", err)
 		}
-		next := domain.StatusReviewing
+		next := domain.StatusReview
 		if hasCI {
 			next = domain.StatusCI
 		}

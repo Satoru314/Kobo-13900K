@@ -5,13 +5,13 @@ import "github.com/Satoru314/Kobo-13900K/api/src/domain"
 // history answers questions from a task's events, oldest first.
 type history []domain.Event
 
-// statusBeforeError is the queue status of the stage the task last failed in.
+// statusBeforeError is the waiting status of the stage the task last failed in.
 func (h history) statusBeforeError() (domain.Status, bool) {
 	for i := len(h) - 1; i >= 0; i-- {
 		e := h[i]
 		if e.Type == domain.EventStatusChanged && e.Payload["to"] == string(domain.StatusError) {
 			from, _ := e.Payload["from"].(string)
-			return domain.Status(from).QueueStatus(), from != ""
+			return domain.Status(from).WaitingStatus(), from != ""
 		}
 	}
 	return "", false

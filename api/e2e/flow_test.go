@@ -16,7 +16,7 @@ func TestHappyPath(t *testing.T) {
 	h := newHarness(t)
 	h.git.workflows = true
 	task := h.createTask("add login", "")
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 
 	var projects struct {
 		Projects []domain.Project `json:"projects"`
@@ -40,7 +40,7 @@ func TestHappyPath(t *testing.T) {
 	h.wantStatus(task.ID, domain.StatusCI)
 	h.gh.ci = []irepository.CIResult{{State: irepository.CISuccess}}
 	h.checkCI()
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 
 	h.runner.script(approve())
 	run = h.runNext()
@@ -73,7 +73,7 @@ func TestHappyPath(t *testing.T) {
 
 	want := []domain.EventType{domain.EventTaskCreated, domain.EventStatusChanged, domain.EventSessionStarted,
 		domain.EventAIInput, domain.EventAIResult, domain.EventPRCreated, domain.EventStatusChanged,
-		domain.EventCIResult, domain.EventStatusChanged, domain.EventSessionStarted, domain.EventAIInput,
+		domain.EventCIResult, domain.EventStatusChanged, domain.EventStatusChanged, domain.EventSessionStarted, domain.EventAIInput,
 		domain.EventAIResult, domain.EventReviewResult, domain.EventStatusChanged, domain.EventStatusChanged}
 	if got := h.eventTypes(task.ID); !slices.Equal(got, want) {
 		t.Fatalf("events =\n%v\nwant\n%v", got, want)
@@ -90,7 +90,7 @@ func TestReviewLoopEndsUnresolved(t *testing.T) {
 	h.runner.script(devDone(3), requestChanges("rename x"), devDone(3), requestChanges("still bad"))
 
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusReviewing) // no CI in this repo
+	h.wantStatus(task.ID, domain.StatusReview) // no CI in this repo
 
 	h.runNext()
 	h.wantStatus(task.ID, domain.StatusFix)
@@ -105,7 +105,7 @@ func TestReviewLoopEndsUnresolved(t *testing.T) {
 	if fix.WorkDir != h.runner.calls[0].WorkDir {
 		t.Fatalf("fix worktree path %s differs from the first %s", fix.WorkDir, h.runner.calls[0].WorkDir)
 	}
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 
 	review := h.runNext()
 	if !review.Resume || !strings.Contains(review.Prompt, "2 周目") {
@@ -164,7 +164,7 @@ func TestCICheckSurvivesGitHubErrors(t *testing.T) {
 	}
 	h.wantStatus(task.ID, domain.StatusCI)
 	h.checkCI()
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 }
 
 // Silent exits are retried twice, then the task goes to error; retry resumes at the failed stage.
@@ -174,9 +174,9 @@ func TestSystemErrorsRetryThenError(t *testing.T) {
 	h.runner.script(exitSilently, exitSilently, exitSilently)
 
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	h.runNext()
 	d := h.wantStatus(task.ID, domain.StatusError)
 	if !strings.Contains(d.LastError, "without reporting back") {
@@ -191,10 +191,10 @@ func TestSystemErrorsRetryThenError(t *testing.T) {
 	if code := h.rest("POST", fmt.Sprintf("/tasks/%d/retry", task.ID), nil, &retried); code != 200 {
 		t.Fatalf("retry = %d", code)
 	}
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	h.runner.script(devDone(9))
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 }
 
 // A run that never reports is killed at the timeout and counts as a failure.
@@ -207,7 +207,7 @@ func TestTimeoutKillsRun(t *testing.T) {
 	if time.Since(start) > 10*time.Second {
 		t.Fatal("run was not stopped at the timeout")
 	}
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	var events []domain.Event
 	h.rest("GET", fmt.Sprintf("/tasks/%d/events", task.ID), nil, &events)
 	last := events[len(events)-1]
@@ -233,7 +233,7 @@ func TestBlockedThenEditAndRetry(t *testing.T) {
 	if err := h.callUser("retry_task", map[string]any{"id": task.ID}, nil); err != nil {
 		t.Fatal(err)
 	}
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 }
 
 func TestCancelAndEditRules(t *testing.T) {
@@ -241,13 +241,13 @@ func TestCancelAndEditRules(t *testing.T) {
 	a := h.createTask("a", "")
 	b := h.createTask("b", "")
 	if code := h.rest("POST", fmt.Sprintf("/tasks/%d/cancel", a.ID), nil, nil); code != 200 {
-		t.Fatalf("cancel runnable = %d", code)
+		t.Fatalf("cancel develop = %d", code)
 	}
 	h.wantStatus(a.ID, domain.StatusCancelled)
 
 	h.runner.script(devDone(2))
 	h.runNext()
-	h.wantStatus(b.ID, domain.StatusReviewing)
+	h.wantStatus(b.ID, domain.StatusReview)
 	if code := h.rest("POST", fmt.Sprintf("/tasks/%d/cancel", b.ID), nil, nil); code != 400 {
 		t.Fatalf("cancel under review = %d, want 400", code)
 	}
@@ -279,7 +279,7 @@ func TestQueuePriority(t *testing.T) {
 	h.runNext() // first: dev
 	h.runNext() // first: review, ahead of second because reviews rank above new tasks
 	h.wantStatus(first.ID, domain.StatusFix)
-	h.wantStatus(second.ID, domain.StatusRunnable)
+	h.wantStatus(second.ID, domain.StatusDevelop)
 
 	var queue struct {
 		Tasks []domain.Task `json:"tasks"`
@@ -308,6 +308,21 @@ func TestQueuePriority(t *testing.T) {
 	h.nothingReady() // only the off_peak task is left
 }
 
+// priority tasks go ahead of immediate ones that were created earlier.
+func TestPriorityMode(t *testing.T) {
+	h := newHarness(t)
+	normal := h.createTask("normal", "")
+	urgent := h.createTask("urgent", domain.ModePriority)
+	h.runner.script(devDone(1), devDone(2))
+	if run := h.runNext(); run.Task.ID != urgent.ID {
+		t.Fatalf("ran task %d, want the priority task %d", run.Task.ID, urgent.ID)
+	}
+	if run := h.runNext(); run.Task.ID != urgent.ID || run.Role != domain.RoleReview {
+		t.Fatalf("ran task %d as %s, want the review of %d", run.Task.ID, run.Role, urgent.ID)
+	}
+	h.wantStatus(normal.ID, domain.StatusDevelop)
+}
+
 // A task left running when kobo stopped is put back without counting as a failure.
 func TestRecoverAfterRestart(t *testing.T) {
 	h := newHarness(t)
@@ -315,14 +330,15 @@ func TestRecoverAfterRestart(t *testing.T) {
 	if _, ok, err := h.queue.Take(h.ctx, time.Now()); !ok || err != nil {
 		t.Fatalf("take: %v %v", ok, err)
 	}
+	h.wantStatus(task.ID, domain.StatusDeveloping)
 	h.nothingReady() // one at a time
 	if err := h.queue.Recover(h.ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	h.runner.script(devDone(4))
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 }
 
 // Reports with nothing running, or from the wrong role, are rejected.
@@ -334,7 +350,7 @@ func TestAgentToolsRejectMisuse(t *testing.T) {
 	if len(h.runner.toolErrs) != 1 || !strings.Contains(h.runner.toolErrs[0], "complete_review is for reviews") {
 		t.Fatalf("tool errors = %v", h.runner.toolErrs)
 	}
-	h.wantStatus(task.ID, domain.StatusRunnable)
+	h.wantStatus(task.ID, domain.StatusDevelop)
 	h.runNext()
-	h.wantStatus(task.ID, domain.StatusReviewing)
+	h.wantStatus(task.ID, domain.StatusReview)
 }

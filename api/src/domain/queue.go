@@ -37,25 +37,27 @@ type Queue struct {
 	OffPeak OffPeakWindow
 }
 
-// rank orders queued tasks: review fixes first, then reviews, then new tasks.
+// rank orders waiting tasks: fixes first, then reviews, then new tasks by mode.
 func (Queue) rank(t Task) int {
 	switch {
 	case t.Status == StatusFix:
 		return 0
-	case t.Status == StatusReviewing:
+	case t.Status == StatusReview:
 		return 1
-	case t.Mode == ModeImmediate:
+	case t.Mode == ModePriority:
 		return 2
-	default:
+	case t.Mode == ModeImmediate:
 		return 3
+	default:
+		return 4
 	}
 }
 
-// Order returns the queued, not running tasks in the order they will be taken out.
+// Order returns the waiting tasks in the order they will be taken out.
 func (q Queue) Order(tasks []Task) []Task {
 	var out []Task
 	for _, t := range tasks {
-		if t.Status.Queued() && !t.Running && t.EnqueuedAt != nil {
+		if t.Status.Waiting() && t.EnqueuedAt != nil {
 			out = append(out, t)
 		}
 	}
@@ -71,13 +73,13 @@ func (q Queue) Order(tasks []Task) []Task {
 	return out
 }
 
-// Ready reports whether a queued task may be taken out at now. The mode only
-// holds back new tasks; reviews and fixes of a started task always go ahead.
+// Ready reports whether a waiting task may be taken out at now. The mode only
+// holds back new off_peak tasks; reviews and fixes of a started task always go ahead.
 func (q Queue) Ready(t Task, now time.Time) bool {
 	if t.EnqueuedAt == nil || t.EnqueuedAt.After(now) {
 		return false
 	}
-	return t.Status != StatusRunnable || t.Mode == ModeImmediate || q.OffPeak.Contains(now)
+	return t.Status != StatusDevelop || t.Mode != ModeOffPeak || q.OffPeak.Contains(now)
 }
 
 // Next picks the task to run at now, if any.

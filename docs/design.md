@@ -25,7 +25,7 @@
 
 - MCP からのタスク発行（MVP では Claude Code から。操作はすべて AI 経由）
 - 直列のキュー（レビュー対応を優先）
-- タスクごとの実行モード：すぐ実行するか、安い時間帯まで待つか
+- タスクごとの実行モード：優先・通常・安い時間帯まで待つ（夜間）
 - AI によるタスク実行と PR 作成
 - CI（GitHub Actions）とレビューのループ（最大2周）
 - GUI での状態一覧（見るだけ）。完成タスクには PR へのリンクを付ける
@@ -42,23 +42,31 @@
 ## タスクの状態
 
 ```
-runnable → developing → ci → reviewing → done / unresolved → finished
-                              ↑      ↓
-                              ci ← fix
+develop → developing → ci → review → reviewing → done / unresolved → finished
+                       ↑ ↘                  ↙
+                       │   fix ←────────────
+                       │    ↓
+                       └ fixing
 ```
+
+- 待ち（`develop` / `review` / `fix`）と実行中（`developing` / `reviewing` / `fixing`）は別の status にする。AI に渡すと待ちから実行中に、終わると次の待ちに移る
+- `ci` から `fix` に行くのは CI が失敗したとき。`fixing` が終わると `ci`（CI がなければ `review`）に戻る
+- 実行中にシステムエラーが起きたら、自動のやり直しでは同じ段階の待ちに戻る
 
 | status | 意味 |
 |---|---|
-| `runnable` | 発行済み、実行待ち |
+| `develop` | 発行済み、開発の順番待ち |
 | `developing` | 開発中 |
 | `ci` | GitHub の CI 実行中。CI が設定されていないリポジトリでは飛ばす |
+| `review` | レビューの順番待ち |
 | `reviewing` | レビュー中 |
-| `fix` | レビューの指摘に対応中。終わったら `ci` → `reviewing` に戻る |
+| `fix` | レビューの指摘か CI の失敗への対応の順番待ち |
+| `fixing` | 対応中。終わったら `ci` → `review` に戻る |
 | `done` | 完成（レビュー通過） |
 | `unresolved` | 2周しても指摘が残った、または CI が通らなかった |
 | `finished` | PR がマージまたはクローズされた。一覧には出さない |
 | `error` | システムエラー、または AI が「進められない」と報告して止まった。人が retry するまで動かない |
-| `cancelled` | ユーザーが取り消した（`runnable` のときだけ）。一覧には出さない |
+| `cancelled` | ユーザーが取り消した（`develop` のときだけ）。一覧には出さない |
 
 - `done` と `unresolved` は同じ一覧に PR リンク付きで並べ、status で見分ける
 - マージかクローズかの区別は `pull_request.state` で持つ
@@ -85,10 +93,11 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 
 キュー専用のテーブルは持たず、task を並べたものをキューとみなす。
 
-- **対象**：status が `runnable` / `reviewing` / `fix` で、`running` でない task
-- **順番**：`fix` → `reviewing` → 新規（`immediate`）→ 新規（`off_peak`、安い時間帯の間だけ）。それぞれの中では `enqueued_at` の古い順
-- mode が効くのは新規（`runnable`）だけ。始まったタスクのレビューと fix は時間帯に関係なく進める
-- **実行モード**（`task.mode`）
+- **対象**：status が `develop` / `review` / `fix` の task
+- **順番**：`fix` → `review` → 新規（`priority`）→ 新規（`immediate`）→ 新規（`off_peak`、安い時間帯の間だけ）。それぞれの中では `enqueued_at` の古い順
+- mode が効くのは新規（`develop`）だけ。始まったタスクのレビューと fix は mode と時間帯に関係なく進める
+- **実行モード**（`task.mode`）。GUI では 優先 / 通常 / 夜間 と表示する
+  - `priority`：ほかの新規より先に実行する
   - `immediate`：順番が来しだい実行する
   - `off_peak`：安い時間帯になるまで待つ。安い時間帯は設定で時刻の範囲として決める（例: DeepSeek のオフピーク割引の時間帯）
 - `enqueued_at` は、上の status になってキューに入った時刻。キューの外にいる間は空
@@ -141,8 +150,8 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 | GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く |
 | GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
 | GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
-| PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`runnable` と `error` の間だけ |
-| POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`runnable` の間だけ。`cancelled` にする |
+| PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`develop` と `error` の間だけ |
+| POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`develop` の間だけ。`cancelled` にする |
 | POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
 | GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
 
@@ -178,7 +187,7 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 - キューから次の task を取り出し、AI を起動または resume する
 - `ci` の task の CI 結果を GitHub にポーリングで確認する
   - 判定：PR の最新コミットの check がすべて終わったら完了
-  - 成功なら `reviewing`、失敗なら `fix`（直すのは開発 AI）
+  - 成功なら `review`、失敗なら `fix`（直すのは開発 AI）
   - CI の有無はリポジトリに `.github/workflows` があるかで判定する。ない場合は `ci` を飛ばす
   - CI の状態を GUI に出すのは後回し
 - PR のマージ・クローズを検知して `finished` にする
@@ -217,7 +226,7 @@ Kobo が AI を起動・resume するときに渡す文章。`{...}` は Kobo �
 - どちらかを呼んだら、それ以上は何もしない
 ```
 
-### 対応（fix）
+### 対応（fixing）
 
 ```
 PR {pr_url} に次の指摘がありました。対応してください。
@@ -287,8 +296,7 @@ erDiagram
     text title
     text description
     enum status
-    enum mode "immediate / off_peak"
-    bool running
+    enum mode "priority / immediate / off_peak"
     timestamp enqueued_at "nullable"
     timestamp created_at
     timestamp updated_at
@@ -421,7 +429,7 @@ Kobo-13900K/
 │       │   ├── project.go         一覧、ディレクトリ名からの登録
 │       │   ├── queue.go           次のタスクを取り出して実行する
 │       │   ├── completion.go      AI の完了通知・進められない報告の反映
-│       │   ├── ci.go              CI 結果の反映（成功 → reviewing、失敗 → fix、周回の判定）
+│       │   ├── ci.go              CI 結果の反映（成功 → review、失敗 → fix、周回の判定）
 │       │   ├── pr.go              マージ・クローズの反映
 │       │   └── signal.go          キューの合図、実行中の AI、変更通知の配信
 │       │

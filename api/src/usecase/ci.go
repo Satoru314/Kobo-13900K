@@ -75,7 +75,7 @@ func (u *CIUsecase) checkTask(ctx context.Context, taskID int64, now time.Time) 
 			return err
 		}
 		if ci.State == irepository.CISuccess {
-			return u.track.move(ctx, &task, domain.StatusReviewing, "", now)
+			return u.track.move(ctx, &task, domain.StatusReview, "", now)
 		}
 		round, err := u.book.add(ctx, taskID, domain.ReviewCIFailed, ci.Summary, now)
 		if err != nil {

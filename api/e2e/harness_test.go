@@ -318,8 +318,8 @@ func (h *harness) wantStatus(id int64, want domain.Status) usecase.TaskDetail {
 	h.t.Helper()
 	d := h.detail(id)
 	if d.Task.Status != want {
-		h.t.Fatalf("task %d status = %s, want %s (running=%v, last_error=%q, tool errors=%v)",
-			id, d.Task.Status, want, d.Task.Running, d.LastError, h.runner.toolErrs)
+		h.t.Fatalf("task %d status = %s, want %s (last_error=%q, tool errors=%v)",
+			id, d.Task.Status, want, d.LastError, h.runner.toolErrs)
 	}
 	return d
 }

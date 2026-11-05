@@ -31,7 +31,7 @@ type CreateTaskInput struct {
 	Project     string      `json:"project" jsonschema:"directory name of the target repository, e.g. emela"`
 	Title       string      `json:"title" jsonschema:"short title shown in the task list"`
 	Description string      `json:"description" jsonschema:"full instructions for the developing AI"`
-	Mode        domain.Mode `json:"mode,omitempty" jsonschema:"immediate (default) or off_peak"`
+	Mode        domain.Mode `json:"mode,omitempty" jsonschema:"priority, immediate (default) or off_peak"`
 }
 
 func (u *TaskUsecase) Create(ctx context.Context, in CreateTaskInput, now time.Time) (domain.Task, error) {
@@ -138,7 +138,7 @@ type UpdateTaskInput struct {
 	ID          int64        `json:"id"`
 	Title       *string      `json:"title,omitempty"`
 	Description *string      `json:"description,omitempty"`
-	Mode        *domain.Mode `json:"mode,omitempty" jsonschema:"immediate or off_peak"`
+	Mode        *domain.Mode `json:"mode,omitempty" jsonschema:"priority, immediate or off_peak"`
 }
 
 func (u *TaskUsecase) Update(ctx context.Context, in UpdateTaskInput, now time.Time) (domain.Task, error) {

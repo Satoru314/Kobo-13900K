@@ -25,7 +25,7 @@ func (s *Server) UserHandler() http.Handler {
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_tasks", Description: "List tasks. Finished and cancelled tasks are left out unless include_hidden is set or statuses are given."}, s.tasks.List)
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_task", Description: "Show a task with its project, pull request, review rounds and, when in error, the last error."}, s.tasks.Get)
 	mcp.AddTool(srv, &mcp.Tool{Name: "get_task_events", Description: "Show the run history of a task, oldest first."}, s.tasks.Events)
-	mcp.AddTool(srv, &mcp.Tool{Name: "update_task", Description: "Change title, description or mode of a task that is runnable or in error."}, s.tasks.Update)
+	mcp.AddTool(srv, &mcp.Tool{Name: "update_task", Description: "Change title, description or mode of a task that is waiting in develop or in error."}, s.tasks.Update)
 	mcp.AddTool(srv, &mcp.Tool{Name: "cancel_task", Description: "Cancel a task that has not started yet."}, s.tasks.Cancel)
 	mcp.AddTool(srv, &mcp.Tool{Name: "retry_task", Description: "Put a task in error back into the queue at the stage it failed in."}, s.tasks.Retry)
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_projects", Description: "List registered projects (target repositories)."}, s.projects.List)

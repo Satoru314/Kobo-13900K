@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"time"
 
@@ -12,8 +13,8 @@ import (
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
-// queueStatuses are every status a task can be taken out of the queue in, or be running in.
-var queueStatuses = []domain.Status{domain.StatusRunnable, domain.StatusDeveloping, domain.StatusReviewing, domain.StatusFix}
+// queueStatuses are every status a task can wait in the queue in, or be running in.
+var queueStatuses = append(slices.Clone(domain.WaitingStatuses), domain.RunningStatuses...)
 
 type QueueUsecase struct {
 	tx       irepository.Transactor
@@ -80,7 +81,7 @@ func (u *QueueUsecase) Take(ctx context.Context, now time.Time) (Run, bool, erro
 			return err
 		}
 		for _, t := range tasks {
-			if t.Running {
+			if t.Status.Running() {
 				return nil
 			}
 		}
@@ -99,11 +100,9 @@ func (u *QueueUsecase) Take(ctx context.Context, now time.Time) (Run, bool, erro
 		if err := u.tasks.Update(ctx, task); err != nil {
 			return err
 		}
-		if from != task.Status {
-			if err := u.track.record(ctx, task.ID, nil, domain.EventStatusChanged,
-				map[string]any{"from": string(from), "to": string(task.Status)}, now); err != nil {
-				return err
-			}
+		if err := u.track.record(ctx, task.ID, nil, domain.EventStatusChanged,
+			map[string]any{"from": string(from), "to": string(task.Status)}, now); err != nil {
+			return err
 		}
 		if run, err = u.prepare(ctx, task, now); err != nil {
 			return err
@@ -186,7 +185,7 @@ func (u *QueueUsecase) Execute(ctx context.Context, run Run) error {
 	repoDir := u.projects.Dir(run.Project)
 	branch, base := run.Task.Branch(), run.Project.DefaultBranch
 	switch run.Task.Status {
-	case domain.StatusFix:
+	case domain.StatusFixing:
 		base = branch
 	case domain.StatusReviewing:
 		branch, base = "", branch
@@ -220,7 +219,7 @@ func (u *QueueUsecase) Settle(ctx context.Context, run Run, runErr error, now ti
 		if err != nil {
 			return err
 		}
-		if !task.Running {
+		if !task.Status.Running() {
 			return nil // the AI reported back
 		}
 		msg := "AI exited without reporting back"
@@ -259,7 +258,7 @@ func (u *QueueUsecase) Recover(ctx context.Context, now time.Time) error {
 			return err
 		}
 		for _, t := range tasks {
-			if !t.Running {
+			if !t.Status.Running() {
 				continue
 			}
 			if err := t.Requeue(now, now); err != nil {
