@@ -37,18 +37,25 @@ func claudeMCPConfig(servers []mcpServer) (string, error) {
 	return string(b), err
 }
 
-// openCodeServerEntry is one mcp.servers entry of opencode's config.
-func openCodeServerEntry(s mcpServer) (map[string]any, error) {
-	switch {
-	case s.URL != "":
-		return map[string]any{"type": "remote", "url": s.URL}, nil
-	case len(s.Command) > 0:
-		e := map[string]any{"type": "local", "command": s.Command}
-		if len(s.Env) > 0 {
-			e["environment"] = s.Env
+// openCodeMCPConfig builds the config passed to opencode in
+// OPENCODE_CONFIG_CONTENT. opencode merges it with the repository's own
+// opencode.json, so nothing is written into the worktree.
+func openCodeMCPConfig(servers []mcpServer) (string, error) {
+	entries := map[string]any{}
+	for _, s := range servers {
+		switch {
+		case s.URL != "":
+			entries[s.Name] = map[string]any{"type": "remote", "url": s.URL}
+		case len(s.Command) > 0:
+			e := map[string]any{"type": "local", "command": s.Command}
+			if len(s.Env) > 0 {
+				e["environment"] = s.Env
+			}
+			entries[s.Name] = e
+		default:
+			return "", fmt.Errorf("MCP server %q has neither a URL nor a command", s.Name)
 		}
-		return e, nil
-	default:
-		return nil, fmt.Errorf("MCP server %q has neither a URL nor a command", s.Name)
 	}
+	b, err := json.Marshal(map[string]any{"mcp": map[string]any{"servers": entries}})
+	return string(b), err
 }

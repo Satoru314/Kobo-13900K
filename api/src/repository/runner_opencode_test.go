@@ -24,7 +24,7 @@ func newOpenCodeEnv(t *testing.T, withBrowser bool) *openCodeEnv {
 	mustMkdir(t, tools)
 	opencode := filepath.Join(tools, "opencode")
 	writeScript(t, opencode, `for a in "$@"; do printf '%s\n' "$a"; done > "`+root+`/opencode.args"
-cp opencode.json "`+root+`/opencode.seen.json"`)
+printf '%s' "$OPENCODE_CONFIG_CONTENT" > "`+root+`/opencode.seen.json"`)
 
 	var browser *playwright
 	if withBrowser {
@@ -60,7 +60,7 @@ type openCodeConfig struct {
 	} `json:"mcp"`
 }
 
-func TestOpenCodeRunPassesMCPViaWorktreeConfig(t *testing.T) {
+func TestOpenCodeRunPassesMCPViaEnvironment(t *testing.T) {
 	e := newOpenCodeEnv(t, true)
 	args, err := e.run(usecase.RunRequest{AI: "deepseek-v4.1-flash", Model: "opencode-go/deepseek-v4.1-flash"})
 	if err != nil {
@@ -90,44 +90,7 @@ func TestOpenCodeRunPassesMCPViaWorktreeConfig(t *testing.T) {
 		t.Errorf("playwright command = %v", pw.Command)
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "opencode.json")); !os.IsNotExist(err) {
-		t.Errorf("temporary opencode.json was not removed: %v", err)
-	}
-}
-
-func TestOpenCodeMergesAndRestoresExistingConfig(t *testing.T) {
-	e := newOpenCodeEnv(t, false)
-	original := `{"model":"some-model","mcp":{"servers":{"mine":{"type":"remote","url":"http://example.test/mcp"}}}}`
-	if err := os.WriteFile(filepath.Join(e.root, "opencode.json"), []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.run(usecase.RunRequest{}); err != nil {
-		t.Fatal(err)
-	}
-	var cfg openCodeConfig
-	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(e.root, "opencode.seen.json"))), &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Model != "some-model" {
-		t.Errorf("existing keys were lost: %+v", cfg)
-	}
-	if _, ok := cfg.MCP.Servers["mine"]; !ok {
-		t.Errorf("existing MCP server was lost: %+v", cfg.MCP.Servers)
-	}
-	if _, ok := cfg.MCP.Servers["kobo-agent"]; !ok {
-		t.Errorf("kobo server missing: %+v", cfg.MCP.Servers)
-	}
-	if got := readFile(t, filepath.Join(e.root, "opencode.json")); got != original {
-		t.Errorf("config was not restored:\n%s", got)
-	}
-}
-
-func TestOpenCodeRejectsCommentedConfig(t *testing.T) {
-	e := newOpenCodeEnv(t, false)
-	if err := os.WriteFile(filepath.Join(e.root, "opencode.json"), []byte("{ // comment\n}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.run(usecase.RunRequest{}); err == nil || !strings.Contains(err.Error(), "not valid JSON") {
-		t.Fatalf("err = %v", err)
+		t.Errorf("opencode.json was written into the worktree: %v", err)
 	}
 }
 

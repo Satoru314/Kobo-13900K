@@ -131,7 +131,7 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 - **完了通知の本人確認はしない**：直列なので、通知は常に実行中のタスクのもの。そのため時間切れのプロセスは必ず止め、遅れて届く通知が起きないようにする
 - **レビュー**：レビュー AI は指摘を PR にコメントとして書き、結果を `complete_review` で Kobo に返す
 - **opencode**：`opencode run --standalone --session ... --model ... --agent ... --format json --auto` で起動する。共有バックグラウンドサービスには相乗りせず、`OPENCODE_DISABLE_AUTOUPDATE=1` で自動更新も止める
-- **opencode の MCP**：`opencode.json` を worktree 直下に一時的に置き、`mcp.servers` に `kobo-agent`（remote）と `kobo-playwright`（local）を書く。既存の `opencode.json` は JSON として読み、他のキーを残したままマージし、実行後に元へ戻す。コメント付きの JSONC はエラーにする（黙って書き換えない）
+- **opencode の MCP**：`mcp.servers` に `kobo-agent`（remote）と `kobo-playwright`（local）を書いた設定を、環境変数 `OPENCODE_CONFIG_CONTENT` で渡す。opencode はリポジトリの `opencode.json` とこれをマージする。worktree にはファイルを置かないので、AI が誤って commit することがない。`OPENCODE_CONFIG_CONTENT` を読むのは `--standalone` の専用サーバーだけ
 - **ブラウザ**：AI を起動するとき、Kobo の MCP と並べて Playwright の MCP サーバーを渡す。画面の動作確認はこれで行う
   - ヘッドレスの chromium で動かす。プロファイルはメモリ上に置き、タスクの間で共有しない
   - スナップショットなどの出力先は `{log_dir}/playwright/{ログ名}`。worktree に出すと AI が誤って commit しかねないため

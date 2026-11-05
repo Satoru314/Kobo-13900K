@@ -113,10 +113,16 @@ func (u *Usecase) take(ctx context.Context, now time.Time) (run, bool, error) {
 		if task.Status == domain.StatusReviewing {
 			r.role, r.timeout = domain.RoleReview, u.settings.ReviewTimeout
 		}
+		// An AI that is not configured is found before prepare writes anything,
+		// so the task is kept taken and settle moves it to error. Any other
+		// failure rolls the whole take back.
 		prepared, err := u.prepare(ctx, task, now)
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrAIUnavailable):
 			r.prepareErr = err
-		} else {
+		case err != nil:
+			return err
+		default:
 			r = prepared
 		}
 		found = true

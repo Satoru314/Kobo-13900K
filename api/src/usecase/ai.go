@@ -22,28 +22,15 @@ func (u *Usecase) GetAIView(ctx context.Context) (AIView, error) {
 	return AIView{Models: models, Setting: setting}, nil
 }
 
-// SetAISetting changes the models new sessions start with. A setting that names
-// a model missing from ai.json is refused, so the queue cannot pick a dead model.
+// SetAISetting changes the models new sessions start with. Both ids must be in
+// ai.json, so the queue cannot pick a dead model.
 func (u *Usecase) SetAISetting(ctx context.Context, in SetAISettingInput, now time.Time) (domain.AISetting, error) {
-	if in.DevAI == "" {
-		return domain.AISetting{}, fmt.Errorf("%w: dev_ai is required", ErrInvalidInput)
-	}
-	if _, ok := u.catalog.Get(in.DevAI); !ok {
-		return domain.AISetting{}, fmt.Errorf("%w: unknown AI model %q", ErrInvalidInput, in.DevAI)
-	}
-	review := in.ReviewAI
-	if review == "" {
-		review = in.DevAI
-	}
-	if _, ok := u.catalog.Get(review); !ok {
-		if in.SeparateReview {
-			return domain.AISetting{}, fmt.Errorf("%w: unknown AI model %q", ErrInvalidInput, review)
+	for _, id := range []string{in.DevAI, in.ReviewAI} {
+		if _, ok := u.catalog.Get(id); !ok {
+			return domain.AISetting{}, fmt.Errorf("%w: unknown AI model %q", ErrInvalidInput, id)
 		}
-		// Review is not used in this mode. Keep the setting usable instead of
-		// failing because a model was removed from ai.json after it was saved.
-		review = in.DevAI
 	}
-	setting := domain.AISetting{DevAI: in.DevAI, ReviewAI: review, SeparateReview: in.SeparateReview, UpdatedAt: now}
+	setting := domain.AISetting{DevAI: in.DevAI, ReviewAI: in.ReviewAI, SeparateReview: in.SeparateReview, UpdatedAt: now}
 	if err := u.db.SetAISetting(ctx, setting); err != nil {
 		return domain.AISetting{}, err
 	}

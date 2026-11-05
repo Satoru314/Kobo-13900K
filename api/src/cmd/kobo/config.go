@@ -83,17 +83,6 @@ func expandHome(path string) string {
 	return path
 }
 
-// defaultAIConfig finds ai.json when it is not named explicitly. make runs kobo
-// from api/ with go -C, so the parent directory is checked as well.
-func defaultAIConfig() string {
-	for _, p := range []string{"ai.json", filepath.Join("..", "ai.json")} {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return "ai.json"
-}
-
 func LoadConfig() (Config, error) {
 	home, _ := os.UserHomeDir()
 	r := &envReader{}
@@ -101,7 +90,7 @@ func LoadConfig() (Config, error) {
 		DatabaseURL:   r.str("KOBO_DATABASE_URL", ""),
 		Listen:        r.str("KOBO_LISTEN", "127.0.0.1:8787"),
 		LogDir:        expandHome(r.str("KOBO_LOG_DIR", home+"/.kobo/logs")),
-		AIConfigPath:  expandHome(r.str("KOBO_AI_CONFIG", defaultAIConfig())),
+		AIConfigPath:  expandHome(r.str("KOBO_AI_CONFIG", "")),
 		Browser:       r.bool("KOBO_BROWSER", "on"),
 		PlaywrightMCP: expandHome(r.str("KOBO_PLAYWRIGHT_MCP_BIN", "playwright-mcp")),
 		Settings: usecase.Settings{

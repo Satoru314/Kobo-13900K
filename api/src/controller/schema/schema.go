@@ -172,7 +172,7 @@ type ReportBlockedRequest struct {
 
 type AISettingRequest struct {
 	DevAI          string `json:"dev_ai" jsonschema:"catalog id of the model used for development"`
-	ReviewAI       string `json:"review_ai,omitempty" jsonschema:"catalog id used for review when separate_review is true"`
+	ReviewAI       string `json:"review_ai" jsonschema:"catalog id used for review when separate_review is true"`
 	SeparateReview bool   `json:"separate_review" jsonschema:"whether review uses a different model from development"`
 }
 

@@ -17,6 +17,12 @@
       "provider": "claude"
     },
     {
+      "id": "deepseek-v4.1-flash-free",
+      "label": "DeepSeek V4.1 Flash (無料)",
+      "provider": "opencode",
+      "model": "opencode/deepseek-v4.1-flash-free"
+    },
+    {
       "id": "deepseek-v4.1-flash",
       "label": "DeepSeek V4.1 Flash",
       "provider": "opencode",

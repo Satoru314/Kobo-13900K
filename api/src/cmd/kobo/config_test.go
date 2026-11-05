@@ -7,6 +7,7 @@ import (
 
 func TestLoadConfigShotsRepo(t *testing.T) {
 	t.Setenv("KOBO_DATABASE_URL", "postgres://example")
+	t.Setenv("KOBO_AI_CONFIG", "ai.json")
 	for _, c := range []struct{ value, wantErr string }{
 		{"", "KOBO_SHOTS_REPO is required"},
 		{"kobo-shots", "not owner/name"},
