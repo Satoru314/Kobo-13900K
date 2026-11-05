@@ -15,7 +15,7 @@
 ### 方針
 
 - **直列で実行する**：トークンを使いすぎないように、タスクは並列にせずキューで1つずつ処理する
-- **AI を差し替えられるようにする**：当面は開発もレビューも Claude だが、役割ごとに別の AI に替えられる作りにする
+- **AI を差し替えられるようにする**：`ai.json` のカタログから開発・レビューの AI を選ぶ。モデルを増やすときは設定ファイルに1エントリ足すだけで、DB もコードも変えない
 - **対象リポジトリは区別しない**：どのリポジトリも同じように扱う
 - **セルフホスト**：Go で書いたサーバーを CT102 で動かし、MCP サーバーとしても公開する
 
@@ -35,7 +35,6 @@
 
 - 実行中のタスクへの割り込み
 - トークン予算を考えたスケジューリング（安い時間帯の判定を料金体系から自動で決めることも含む）
-- モデルの選択と、Claude 以外の AI
 - 通知、外部からのアクセス
 
 ## タスクの状態
@@ -119,22 +118,52 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 
 ## AI との連携
 
+- **AI の選択**：`ai.json` にプロバイダー（Claude Code / opencode）とモデルのカタログを持つ。設定画面でコーディング用の AI を選び、必要なら「レビュー用AIを分ける」でレビューだけ別の AI にする。設定は DB に1行だけ持つ
+- **セッションの AI は固定する**：セッションを開始したときに `ai` / `provider` / `model` を保存し、resume は設定が変わっても同じ AI・同じモデルで行う。設定変更が効くのは、まだセッションがない役割だけ
+- **モデルの追加**：`ai.json` の `models` に1エントリ足す。プロバイダーの種類を増やすときだけ runner の実装が必要
 - タスク1つにつき、開発セッションとレビューセッションを1つずつ持つ。2回目以降は同じセッションを resume する
 - AI に渡すのは、最初のタスク本文と、`fix` のときのレビュー指摘だけ
 - AI は実装して PR を作り、終わったら Kobo に完了を通知する（PR の URL と要約を添える）
 - 通知を受けたら Kobo がプロセスを止めて status を進める。会話は残しておき、次に resume する
 - 完了通知を出さずにプロセスが終わったら、システムエラーとして扱う
-- **権限**：AI は確認なしで全部許可して動かす（Claude Code なら `--dangerously-skip-permissions`）。止まらないことを優先する
+- **権限**：AI は確認なしで全部許可して動かす（Claude Code なら `--dangerously-skip-permissions`、opencode なら `--auto`）。止まらないことを優先する
 - **実行時間の上限**：開発と fix は60分、レビューは30分（設定で変えられる）。超えたらプロセスを確実に止めてシステムエラーにする
 - **完了通知の本人確認はしない**：直列なので、通知は常に実行中のタスクのもの。そのため時間切れのプロセスは必ず止め、遅れて届く通知が起きないようにする
 - **レビュー**：レビュー AI は指摘を PR にコメントとして書き、結果を `complete_review` で Kobo に返す
-- **ブラウザ**：AI を起動するとき、Kobo の MCP と並べて Playwright の MCP サーバー（`@playwright/mcp`）を渡す。画面の動作確認はこれで行う
+- **opencode**：`opencode run --standalone --session ... --model ... --agent ... --format json --auto` で起動する。共有バックグラウンドサービスには相乗りせず、`OPENCODE_DISABLE_AUTOUPDATE=1` で自動更新も止める
+- **opencode の MCP**：`opencode.json` を worktree 直下に一時的に置き、`mcp.servers` に `kobo-agent`（remote）と `kobo-playwright`（local）を書く。既存の `opencode.json` は JSON として読み、他のキーを残したままマージし、実行後に元へ戻す。コメント付きの JSONC はエラーにする（黙って書き換えない）
+- **ブラウザ**：AI を起動するとき、Kobo の MCP と並べて Playwright の MCP サーバーを渡す。画面の動作確認はこれで行う
   - ヘッドレスの chromium で動かす。プロファイルはメモリ上に置き、タスクの間で共有しない
   - スナップショットなどの出力先は `{log_dir}/playwright/{ログ名}`。worktree に出すと AI が誤って commit しかねないため
-  - `@playwright/mcp` のバージョンは固定する。chromium のビルドがバージョンに紐づくため、上げるときはコードの定数を変える
-  - Kobo が起動してから最初の実行の前に `npx playwright install chromium` を流す（入っていれば何もしない）
-  - `npx` は Kobo の PATH から探し、なければ対話シェルの PATH から探す。systemd の下ではシェルの設定が読まれず、nvm などの node が PATH に載らないため。別のものを使うときは Kobo の環境変数 PATH で指定する
-  - `npx` が見つからない、chromium を入れられないときは、実行ログに書いてブラウザなしで AI を起動する。画面に関係しないタスクまで止めないため。次の実行でまた試す
+  - Playwright MCP は常駐させない。AI の子プロセスとして毎回起動し、AI と一緒に終わる
+  - Kobo はインストールしない。`KOBO_PLAYWRIGHT_MCP_BIN` で指定された実行ファイルを使う。chromium の導入は明示的なセットアップ手順で行う
+  - `KOBO_BROWSER=off` を明示したときだけブラウザなしで動く。デフォルトは `on` で、見つからなければ起動しない
+  - `npx` や対話シェルの PATH 読み込みは使わない。起動時に解決した実行ファイルだけを使う
+
+### AI モデルの設定
+
+`ai.json` にプロバイダーとモデルを書く。`KOBO_AI_CONFIG` でパスを指定する。
+
+```json
+{
+  "providers": {
+    "claude": { "runner": "claude", "bin": "claude" },
+    "opencode": { "runner": "opencode", "bin": "opencode", "agent": "build" }
+  },
+  "models": [
+    { "id": "claude", "label": "Claude", "provider": "claude" },
+    { "id": "deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash",
+      "provider": "opencode", "model": "opencode-go/deepseek-v4.1-flash" }
+  ]
+}
+```
+
+- `id` は DB に保存するので変えない。表示名は `label`、opencode に渡すモデルは `model`。
+- カタログは起動時に読む。`ai.json` を変えたら kobo を再起動する。
+- `model` が空ならその CLI のデフォルト（Claude はこれ）。
+- 設定画面では「コーディング用AI」を選び、「レビュー用AIを分ける」をオンにしたときだけ「レビュー用AI」を選ぶ。オフのときはレビューもコーディングと同じ AI を使う。
+- DB の `ai_setting` は1行だけ。`dev_ai` / `review_ai` / `separate_review` を持つ。
+- セッション開始時に選んだ `ai` / `provider` / `model` を `session` に保存し、resume はそれを正とする。
 
 ### 作業ディレクトリ
 
@@ -147,7 +176,7 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 
 ### ユーザー向け
 
-GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツールとして呼ぶ。
+GUI からは REST、AI（Claude Code / opencode）からは同じ機能を MCP ツールとして呼ぶ。
 
 | メソッド | パス | MCP ツール | 内容 |
 |---|---|---|---|
@@ -156,12 +185,14 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 | POST | `/projects` | - | ディレクトリ名を指定してプロジェクトを登録する |
 | POST | `/tasks` | `create_task` | タスク発行。ディレクトリ名・タイトル・本文・mode を指定。未登録のリポジトリならここで登録し、owner / name / default_branch は git remote から埋める |
 | GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く。各タスクにプロジェクトのディレクトリ名、PR の URL と番号、最新の CI の状態（pending / success / failure）を付ける |
-| GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
+| GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果、開発・レビューのセッションで使った AI |
 | GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
 | PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`develop` と `error` の間だけ |
 | POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`develop` の間だけ。`cancelled` にする |
 | POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
 | GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
+| GET | `/ai` | - | AI モデルのカタログと、いまの開発・レビューの選択 |
+| PUT | `/ai/setting` | - | 開発・レビューの AI を変更する。`separate_review` で分離する |
 
 ### AI 向け
 
@@ -340,9 +371,18 @@ erDiagram
     int id PK
     int task_id FK
     enum role "dev / review"
-    text provider "claude"
+    text ai "ai.json のモデル id"
+    text provider "claude / opencode"
+    text model "provider に渡すモデル"
     text external_session_id "resume 用"
     timestamp created_at
+  }
+  ai_setting {
+    int id PK "1 だけ"
+    text dev_ai
+    text review_ai
+    bool separate_review
+    timestamp updated_at
   }
   review_round {
     int id PK
@@ -363,6 +403,8 @@ erDiagram
 
 - `review_round` は CI の失敗も1周として記録する（`result` = `ci_failed`）。レビューと CI の失敗を合わせて最大2周
 - `session` は `(task_id, role)` を一意にして、タスク1つにつき dev と review を1つずつに固定する。作り直しが必要になったら制約を外す
+- `session` の `ai` / `provider` / `model` は開始時に固定する。設定や `ai.json` が変わっても resume は同じ組み合わせを使う
+- `ai_setting` は1行だけ。`dev_ai` / `review_ai` / `separate_review` を持ち、カタログのモデル id を保存する。カタログは `ai.json` が正で、DB にモデル定義は持たない
 - `event` は task に紐づく。AI のセッション内で起きたものは `session_id` も持つ（CI の結果などセッション外の event もあるため）
 - `event` は節目だけを記録する：AI に渡したもの、AI の最終結果、セッション開始・resume、status の変化、PR・CI・レビューの結果、エラー。AI の途中の発言やコマンドは各 AI 自身の記録に任せ、event にはその記録の場所だけを残す
 - タスクの実行フローは、そのタスクの dev と review の event を時系列に並べて追う
@@ -378,7 +420,7 @@ erDiagram
  │ kobo (Go, systemd で常駐)                      │
  │  ├ rest / mcp  REST と MCP の受け口            │
  │  ├ scheduler   キューから次の task を取り出す  │
- │  ├ runner      AI を起動・resume する          │──▶ claude CLI（satoru314 として実行）──▶ Playwright MCP（headless chromium）
+ │  ├ runner      AI を起動・resume する          │──▶ claude CLI / opencode（satoru314 として実行）──▶ Playwright MCP（headless chromium）
  │  ├ watcher     CI と PR の状態をポーリング     │──▶ GitHub
  │  └ worktree    worktree の作成・削除           │──▶ ~/programF 配下
  │ postgres (Docker)                              │
@@ -388,13 +430,16 @@ erDiagram
 - **kobo**：CT102 の上で直接動かす。本番は systemd のサービス、開発中は `go run`
 - **AI**：CT102 の上で satoru314 として動かす。普段の開発環境のツールがそのまま使える。完了通知は localhost の MCP で kobo に返す
 - **DB**：PostgreSQL を Docker で動かす。`compose.yaml` は Postgres 用だけ
-- **runner** は AI ごとに差し替える部品。「タスクを渡して起動」「resume」「完了通知を待つ」だけを決め、Claude 用はその実装の1つ
+- **runner** は AI ごとに差し替える部品。「タスクを渡して起動」「resume」「完了通知を待つ」だけを決め、Claude 用と opencode 用がその実装
 - **ネットワーク**：LAN 内だけ。claude.ai のカスタムコネクタは Anthropic のサーバーから接続するため LAN 内の MCP には届かない。Claude アプリから使うには外への公開と認証が必要（後回し）
 
 ### 準備が要ること
 
 - CT102 の satoru314 を docker グループに入れる（root が必要）
 - CT102 で Docker を動かすため、CT の nesting が有効か確認する
+- `claude` / `opencode` / `gh` / `git` / `playwright-mcp` を入れる。chromium も Playwright のセットアップ手順で入れる
+- Kobo はこれらをインストールしない。`make check` で存在を確認し、足りなければ起動しない
+- `KOBO_AI_CONFIG` に `ai.json` のパスを指定する。`KOBO_BROWSER=off` のときだけブラウザなしで動く
 
 ### 設定
 
@@ -429,12 +474,13 @@ erDiagram
 
 ```
 Kobo-13900K/
-├── Makefile                       make migrate（マイグレーションの適用）
+├── Makefile                       make migrate（マイグレーション）、make check（起動前の確認）
+├── ai.json                        AI プロバイダーとモデルのカタログ
 ├── api/
 │   ├── migrations/                SQL のマイグレーション（テーブル定義の正）。make migrate で適用する
 │   └── src/
 │       ├── cmd/
-│       │   ├── kobo/              main.go 組み立てと起動・停止、config.go 設定の読み込み
+│       │   ├── kobo/              main.go 組み立てと起動・停止、config.go 設定の読み込み、preflight.go 起動前の確認
 │       │   └── migrate/           make migrate の中身
 │       │
 │       ├── domain/                テーブルごとの型、列の値の定数とその Valid()、ErrNotFound。規則は置かない
@@ -452,6 +498,7 @@ Kobo-13900K/
 │       │   ├── watch.go           CI と PR の確認
 │       │   ├── activerun.go       実行中の AI を止めるためのスイッチ
 │       │   ├── history.go         event から求めるもの（直前のステータス、連続失敗数など）
+│       │   ├── ai.go              AI の設定・カタログ・セッション開始時のモデル解決
 │       │   └── prompt.go          AI への指示文
 │       │
 │       ├── repository/            外の世界とのやりとり
@@ -459,7 +506,10 @@ Kobo-13900K/
 │       │   ├── db*.go             DB（Postgres、GORM）。次に実行するタスクの並び順は db_task.go の SQL
 │       │   ├── migrate.go         マイグレーションの適用と未適用の確認
 │       │   ├── repohost.go        RepoHost（git と gh）
-│       │   ├── runner_claude.go   AI（Claude Code）。AI を足すときは runner_<名前>.go
+│       │   ├── aiconfig.go        ai.json の読み込みと検証（usecase.Catalog）
+│       │   ├── mcp.go             MCP サーバーの共通形と Claude / opencode への変換
+│       │   ├── runner_claude.go   AI（Claude Code）
+│       │   ├── runner_opencode.go AI（opencode）
 │       │   ├── playwright.go      AI に渡すブラウザ（Playwright MCP）
 │       │   └── command.go         外部コマンドの実行
 │       │
@@ -475,8 +525,7 @@ Kobo-13900K/
 ├── app/                           フロント（Vite + React + TypeScript）
 ├── docs/design.md
 ├── compose.yaml                   Postgres
-└── .env.example
-```
+└── .env.example```
 
 ### 層のルール
 
@@ -488,6 +537,8 @@ Kobo-13900K/
 - 型の名前: フロントに送る型は Schema、usecase の入出力は DTO、repository の行は Model
 - DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
 - 起動時にマイグレーションを適用しない。未適用のものがあれば起動しない（`make migrate` で適用する）
+- 起動時に外部コマンドとディレクトリを確認し、足りなければ起動しない。`make check` でも同じ確認ができる
+- 実行時にパッケージやブラウザをインストールしない。`npx` や対話シェルの PATH 読み込みも使わない
 
 ### worker
 

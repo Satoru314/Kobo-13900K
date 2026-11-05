@@ -34,6 +34,10 @@ type DB interface {
 
 	CreateSession(ctx context.Context, s *domain.Session) error
 	GetSession(ctx context.Context, taskID int64, role domain.Role) (domain.Session, error)
+	ListSessions(ctx context.Context, taskID int64) ([]domain.Session, error)
+
+	GetAISetting(ctx context.Context) (domain.AISetting, error)
+	SetAISetting(ctx context.Context, s domain.AISetting) error
 
 	CreateReviewRound(ctx context.Context, r *domain.ReviewRound) error
 	ListReviewRounds(ctx context.Context, taskID int64) ([]domain.ReviewRound, error) // in round order
@@ -91,7 +95,11 @@ type RepoHost interface {
 }
 
 type RunRequest struct {
-	Role      domain.Role
+	Role domain.Role
+	// AI is the catalog id, for logs and events. Model is what the provider is
+	// asked to use. Both are fixed on the session when it is created.
+	AI        string
+	Model     string
 	SessionID string
 	// Resume continues SessionID instead of starting a new conversation with it.
 	Resume  bool

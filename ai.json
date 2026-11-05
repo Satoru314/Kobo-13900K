@@ -1,0 +1,26 @@
+{
+  "providers": {
+    "claude": {
+      "runner": "claude",
+      "bin": "claude"
+    },
+    "opencode": {
+      "runner": "opencode",
+      "bin": "opencode",
+      "agent": "build"
+    }
+  },
+  "models": [
+    {
+      "id": "claude",
+      "label": "Claude",
+      "provider": "claude"
+    },
+    {
+      "id": "deepseek-v4.1-flash",
+      "label": "DeepSeek V4.1 Flash",
+      "provider": "opencode",
+      "model": "opencode-go/deepseek-v4.1-flash"
+    }
+  ]
+}

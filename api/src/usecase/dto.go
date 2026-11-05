@@ -1,6 +1,10 @@
 package usecase
 
-import "github.com/Satoru314/Kobo-13900K/api/src/domain"
+import (
+	"time"
+
+	"github.com/Satoru314/Kobo-13900K/api/src/domain"
+)
 
 // Inputs of more than one value, and outputs that no domain type has the shape of.
 
@@ -33,6 +37,29 @@ type CompleteReviewInput struct {
 	Comments string
 }
 
+type SetAISettingInput struct {
+	DevAI          string
+	ReviewAI       string
+	SeparateReview bool
+}
+
+// AIView is what the settings screen shows: the catalog and the current choice.
+type AIView struct {
+	Models  []AIModel
+	Setting domain.AISetting
+}
+
+// SessionInfo is one role's AI conversation on a task, with the catalog label
+// resolved for display.
+type SessionInfo struct {
+	Role      domain.Role
+	AI        string
+	AILabel   string
+	Provider  string
+	Model     string
+	CreatedAt time.Time
+}
+
 // TaskSummary is a task with what its card in the list shows.
 type TaskSummary struct {
 	Task     domain.Task
@@ -48,6 +75,7 @@ type TaskDetail struct {
 	Project     domain.Project
 	PullRequest *domain.PullRequest
 	Rounds      []domain.ReviewRound
+	Sessions    []SessionInfo
 	// LastError is the latest system error or blocked reason while the task is in error.
 	LastError string
 }

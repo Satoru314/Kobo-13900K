@@ -94,7 +94,7 @@ func (u *Usecase) GetTask(ctx context.Context, id int64) (TaskDetail, error) {
 	if err != nil {
 		return TaskDetail{}, err
 	}
-	d := TaskDetail{Task: task, Rounds: []domain.ReviewRound{}}
+	d := TaskDetail{Task: task, Rounds: []domain.ReviewRound{}, Sessions: []SessionInfo{}}
 	if d.Project, err = u.db.GetProject(ctx, task.ProjectID); err != nil {
 		return TaskDetail{}, err
 	}
@@ -110,6 +110,18 @@ func (u *Usecase) GetTask(ctx context.Context, id int64) (TaskDetail, error) {
 		return TaskDetail{}, err
 	}
 	d.Rounds = append(d.Rounds, rounds...)
+	sessions, err := u.db.ListSessions(ctx, id)
+	if err != nil {
+		return TaskDetail{}, err
+	}
+	for _, s := range sessions {
+		label := s.AI
+		if m, ok := u.catalog.Get(s.AI); ok {
+			label = m.Label
+		}
+		d.Sessions = append(d.Sessions, SessionInfo{Role: s.Role, AI: s.AI, AILabel: label,
+			Provider: s.Provider, Model: s.Model, CreatedAt: s.CreatedAt})
+	}
 	if task.Status == domain.StatusError {
 		events, err := u.db.ListEvents(ctx, id)
 		if err != nil {

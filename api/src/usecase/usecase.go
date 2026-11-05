@@ -10,6 +10,9 @@ import (
 var (
 	ErrInvalidInput   = errors.New("invalid input")
 	ErrNothingRunning = errors.New("no task is running")
+	// ErrAIUnavailable is a configuration problem: the model or the runner it
+	// names is gone. Repeating the run does not help, so the task stops at error.
+	ErrAIUnavailable = errors.New("AI is not available")
 )
 
 type Settings struct {
@@ -32,14 +35,15 @@ type Settings struct {
 type Usecase struct {
 	db       DB
 	repo     RepoHost
-	ai       AI
+	ais      map[string]AI
+	catalog  Catalog
 	notify   Notifier
 	settings Settings
 	prompts  prompts
 	active   activeRun
 }
 
-func New(db DB, repo RepoHost, ai AI, notify Notifier, settings Settings) *Usecase {
-	return &Usecase{db: db, repo: repo, ai: ai, notify: notify, settings: settings,
+func New(db DB, repo RepoHost, ais map[string]AI, catalog Catalog, notify Notifier, settings Settings) *Usecase {
+	return &Usecase{db: db, repo: repo, ais: ais, catalog: catalog, notify: notify, settings: settings,
 		prompts: prompts{maxRounds: settings.MaxReviewRounds, shotsRepo: settings.ShotsRepo}}
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { api, type Candidate, type Mode, type Project, type Status, type TaskDetail, type TaskEvent, type TaskSummary } from './api';
+import { api, type AIModel, type AISetting, type AIView, type Candidate, type Mode, type Project, type Status, type TaskDetail, type TaskEvent, type TaskSummary } from './api';
 import { boardLayout, CARD, HDR, type BoardLayout } from './board';
 
 const MODE_NAMES: Record<Mode, string> = { priority: '優先', immediate: '通常', off_peak: '夜間' };
@@ -53,6 +53,7 @@ function store(key: string, value: string) {
 export function App() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [error, setError] = useState('');
+  const [view, setView] = useState<'board' | 'settings'>('board');
   const [selected, setSelected] = useState<number | null>(null);
   const selectedRef = useRef<number | null>(null);
   selectedRef.current = selected;
@@ -104,20 +105,27 @@ export function App() {
           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#55534e', marginTop: 3 }}>13900K</span>
         </div>
         {error && <span style={{ fontSize: 13, fontWeight: 600, color: '#cf222e' }}>{error}</span>}
-        {paused !== null && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-            {paused && <span style={{ fontSize: 13, fontWeight: 700, color: '#cf222e' }}>停止中</span>}
-            <button type="button" className={paused ? 'btn btn-primary' : 'ghost'} disabled={pausing} onClick={togglePause} style={{ height: 32, padding: '0 14px', border: paused ? 'none' : BORDER, background: paused ? '#1f1e1b' : '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: paused ? '#ffffff' : '#1f1e1b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {pausing && <Spinner color={paused ? '#ffffff' : '#1f1e1b'} />}
-              {paused ? '再開' : 'AI を一時停止'}
-            </button>
-          </div>
-        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {paused !== null && (
+            <>
+              {paused && <span style={{ fontSize: 13, fontWeight: 700, color: '#cf222e' }}>停止中</span>}
+              <button type="button" className={paused ? 'btn btn-primary' : 'ghost'} disabled={pausing} onClick={togglePause} style={{ height: 32, padding: '0 14px', border: paused ? 'none' : BORDER, background: paused ? '#1f1e1b' : '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: paused ? '#ffffff' : '#1f1e1b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {pausing && <Spinner color={paused ? '#ffffff' : '#1f1e1b'} />}
+                {paused ? '再開' : 'AI を一時停止'}
+              </button>
+            </>
+          )}
+          <button type="button" className="ghost" aria-label={view === 'settings' ? 'ボードに戻る' : '設定'} title={view === 'settings' ? 'ボードに戻る' : '設定'} onClick={() => setView(view === 'settings' ? 'board' : 'settings')} style={{ width: 32, height: 32, padding: 0, border: BORDER, background: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {view === 'settings'
+              ? <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" stroke="#1f1e1b" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
+              : <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="#1f1e1b" strokeWidth="1.4"><circle cx="8" cy="8" r="2.4" /><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1" strokeLinecap="round" /></svg>}
+          </button>
+        </div>
       </header>
-      <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: 'clip', isolation: 'isolate', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
-        {layout && <Board layout={layout} tasks={tasks} open={setSelected} />}
+      <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: view === 'settings' ? 'auto' : 'clip', isolation: 'isolate', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
+        {view === 'settings' ? <Settings /> : layout && <Board layout={layout} tasks={tasks} open={setSelected} />}
       </main>
-      <Composer />
+      {view === 'board' && <Composer />}
       {selected !== null && <Detail id={selected} version={detailVersion} close={() => setSelected(null)} />}
     </div>
   );
@@ -310,6 +318,91 @@ function Composer() {
   );
 }
 
+function Settings() {
+  const [view, setView] = useState<AIView | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.ai().then((v) => { setView(v); setError(''); }, (e: Error) => setError(e.message));
+  }, []);
+
+  const setting = view?.setting;
+  const save = (next: AISetting) => {
+    setSaving(true);
+    setError('');
+    api.saveAISetting({ dev_ai: next.dev_ai, review_ai: next.review_ai, separate_review: next.separate_review })
+      .then((s) => setView((v) => (v ? { ...v, setting: s } : v)), (e: Error) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  if (!view || !setting) {
+    return (
+      <div style={{ maxWidth: 680 }}>
+        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>設定</h2>
+        {error ? <p style={{ fontSize: 13, fontWeight: 600, color: RED }}>{error}</p> : <p style={{ fontSize: 14, color: '#6b6964' }}>読み込み中…</p>}
+      </div>
+    );
+  }
+
+  const current = view.models.find((m) => m.id === setting.dev_ai);
+  const review = view.models.find((m) => m.id === setting.review_ai) ?? current;
+  const changeDev = (id: string) => {
+    save({ ...setting, dev_ai: id, review_ai: setting.review_ai || id });
+  };
+  const changeReview = (id: string) => save({ ...setting, review_ai: id });
+  const toggleSplit = () => {
+    const on = !setting.separate_review;
+    save({ ...setting, separate_review: on, review_ai: on && !setting.review_ai ? setting.dev_ai : setting.review_ai });
+  };
+
+  return (
+    <div style={{ maxWidth: 680, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#1f1e1b' }}>設定</h2>
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: '#55534e' }}>
+          新しく始まるセッションで使うAIです。すでに始まった開発・レビューは、開始時のAIのまま続きます。
+        </p>
+      </div>
+      <section style={{ border: BORDER, background: '#ffffff', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#3a3935' }}>AI</h3>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, fontWeight: 600, color: '#3a3935' }}>
+          コーディング用AI
+          <select className="ghost" value={setting.dev_ai} disabled={saving} onChange={(e) => changeDev(e.target.value)} style={{ height: 36, maxWidth: 360, padding: '0 8px', border: BORDER, background: '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', cursor: 'pointer' }}>
+            {view.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          {current && <AIDetail model={current} />}
+        </label>
+        <div style={{ borderTop: '1px solid #e3e2df', paddingTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button type="button" role="switch" aria-checked={setting.separate_review} onClick={toggleSplit} disabled={saving} className="ghost" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', border: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', cursor: 'pointer' }}>
+            <span aria-hidden="true" style={{ position: 'relative', display: 'inline-block', width: 34, height: 20, background: setting.separate_review ? '#1f1e1b' : '#d6d5d1', transition: 'background-color .12s' }}>
+              <span style={{ position: 'absolute', top: 2, left: setting.separate_review ? 16 : 2, width: 16, height: 16, background: '#ffffff', transition: 'left .12s' }} />
+            </span>
+            レビュー用AIを分ける
+          </button>
+          {saving && <Spinner color="#1f1e1b" />}
+        </div>
+        {setting.separate_review ? (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, fontWeight: 600, color: '#3a3935' }}>
+            レビュー用AI
+            <select className="ghost" value={setting.review_ai} disabled={saving} onChange={(e) => changeReview(e.target.value)} style={{ height: 36, maxWidth: 360, padding: '0 8px', border: BORDER, background: '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', cursor: 'pointer' }}>
+              {view.models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+            {review && <AIDetail model={review} />}
+          </label>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.7, color: '#6b6964' }}>レビューもコーディングと同じAIを使います。</p>
+        )}
+      </section>
+      {error && <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: RED }}>{error}</p>}
+    </div>
+  );
+}
+
+function AIDetail({ model }: { model: AIModel }) {
+  return <span style={{ fontSize: 12, fontWeight: 500, color: '#6b6964' }}>{model.provider}{model.model ? ` / ${model.model}` : ''}</span>;
+}
+
 const ROUND_RESULTS = {
   approved: { label: '承認', color: '#1f883d' },
   changes_requested: { label: '指摘あり', color: '#1f1e1b' },
@@ -381,6 +474,11 @@ function Detail({ id, version, close }: { id: number; version: number; close: ()
     call(id).then(close, (e: Error) => { setError(e.message); setBusy(false); });
   };
   const t = detail?.task;
+  const aiText = (role: 'dev' | 'review') => {
+    const s = detail?.sessions?.find((x) => x.role === role);
+    if (!s) return '開始前';
+    return `${s.ai_label || s.ai}${s.model ? ` / ${s.model}` : ''}`;
+  };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,15,15,0.18)', display: 'flex', justifyContent: 'flex-end' }}>
@@ -403,6 +501,10 @@ function Detail({ id, version, close }: { id: number; version: number; close: ()
               <dd style={{ margin: 0, fontWeight: 500 }}>{detail.project.dir}</dd>
               <dt style={{ color: '#55534e' }}>実行</dt>
               <dd style={{ margin: 0, fontWeight: 500 }}>{MODE_NAMES[t.mode]}</dd>
+              <dt style={{ color: '#55534e' }}>開発AI</dt>
+              <dd style={{ margin: 0, fontWeight: 500 }}>{aiText('dev')}</dd>
+              <dt style={{ color: '#55534e' }}>レビューAI</dt>
+              <dd style={{ margin: 0, fontWeight: 500 }}>{aiText('review')}</dd>
               <dt style={{ color: '#55534e' }}>PR</dt>
               <dd style={{ margin: 0, fontWeight: 500 }}>
                 {detail.pull_request

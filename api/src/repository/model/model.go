@@ -42,8 +42,18 @@ type Session struct {
 	TaskID            int64     `gorm:"column:task_id"`
 	Role              string    `gorm:"column:role"`
 	Provider          string    `gorm:"column:provider"`
+	AI                string    `gorm:"column:ai"`
+	Model             string    `gorm:"column:model"`
 	ExternalSessionID string    `gorm:"column:external_session_id"`
 	CreatedAt         time.Time `gorm:"column:created_at;autoCreateTime:false"`
+}
+
+type AISetting struct {
+	ID             int       `gorm:"column:id;primaryKey"`
+	DevAI          string    `gorm:"column:dev_ai"`
+	ReviewAI       string    `gorm:"column:review_ai"`
+	SeparateReview bool      `gorm:"column:separate_review"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoCreateTime:false"`
 }
 
 type ReviewRound struct {

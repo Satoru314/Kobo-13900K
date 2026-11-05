@@ -34,7 +34,17 @@ type TaskDetail struct {
 	Project     Project       `json:"project"`
 	PullRequest *PullRequest  `json:"pull_request"`
 	Rounds      []ReviewRound `json:"review_rounds"`
+	Sessions    []Session     `json:"sessions"`
 	LastError   string        `json:"last_error,omitempty"`
+}
+
+type Session struct {
+	Role      string    `json:"role"`
+	AI        string    `json:"ai"`
+	AILabel   string    `json:"ai_label"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Project struct {
@@ -83,6 +93,25 @@ type Event struct {
 
 type QueueState struct {
 	Paused bool `json:"paused"`
+}
+
+type AIModel struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+type AISetting struct {
+	DevAI          string    `json:"dev_ai"`
+	ReviewAI       string    `json:"review_ai"`
+	SeparateReview bool      `json:"separate_review"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type AIView struct {
+	Models  []AIModel `json:"models"`
+	Setting AISetting `json:"setting"`
 }
 
 // ChangeEvent is one message on GET /events.
@@ -141,6 +170,12 @@ type ReportBlockedRequest struct {
 	Reason string `json:"reason" jsonschema:"why the task cannot go on and what a human has to do"`
 }
 
+type AISettingRequest struct {
+	DevAI          string `json:"dev_ai" jsonschema:"catalog id of the model used for development"`
+	ReviewAI       string `json:"review_ai,omitempty" jsonschema:"catalog id used for review when separate_review is true"`
+	SeparateReview bool   `json:"separate_review" jsonschema:"whether review uses a different model from development"`
+}
+
 // MCP results must be objects, so lists are wrapped.
 
 type TaskList struct {
@@ -171,12 +206,30 @@ func FromTaskSummary(s usecase.TaskSummary) TaskSummary {
 }
 
 func FromTaskDetail(d usecase.TaskDetail) TaskDetail {
-	out := TaskDetail{Task: FromTask(d.Task), Project: FromProject(d.Project), Rounds: Map(d.Rounds, FromReviewRound), LastError: d.LastError}
+	out := TaskDetail{Task: FromTask(d.Task), Project: FromProject(d.Project), Rounds: Map(d.Rounds, FromReviewRound),
+		Sessions: Map(d.Sessions, FromSessionInfo), LastError: d.LastError}
 	if d.PullRequest != nil {
 		pr := FromPullRequest(*d.PullRequest)
 		out.PullRequest = &pr
 	}
 	return out
+}
+
+func FromSessionInfo(s usecase.SessionInfo) Session {
+	return Session{Role: string(s.Role), AI: s.AI, AILabel: s.AILabel, Provider: s.Provider,
+		Model: s.Model, CreatedAt: s.CreatedAt}
+}
+
+func FromAIModel(m usecase.AIModel) AIModel {
+	return AIModel{ID: m.ID, Label: m.Label, Provider: m.Provider, Model: m.Model}
+}
+
+func FromAISetting(s domain.AISetting) AISetting {
+	return AISetting{DevAI: s.DevAI, ReviewAI: s.ReviewAI, SeparateReview: s.SeparateReview, UpdatedAt: s.UpdatedAt}
+}
+
+func FromAIView(v usecase.AIView) AIView {
+	return AIView{Models: Map(v.Models, FromAIModel), Setting: FromAISetting(v.Setting)}
 }
 
 func FromProject(p domain.Project) Project {
@@ -229,6 +282,10 @@ func (r CompleteDevelopmentRequest) Input() usecase.CompleteDevelopmentInput {
 
 func (r CompleteReviewRequest) Input() usecase.CompleteReviewInput {
 	return usecase.CompleteReviewInput{Result: domain.ReviewResult(r.Result), Comments: r.Comments}
+}
+
+func (r AISettingRequest) Input() usecase.SetAISettingInput {
+	return usecase.SetAISettingInput{DevAI: r.DevAI, ReviewAI: r.ReviewAI, SeparateReview: r.SeparateReview}
 }
 
 // Map converts a list, keeping an empty list empty rather than null in JSON.

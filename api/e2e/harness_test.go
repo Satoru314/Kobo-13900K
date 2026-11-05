@@ -39,6 +39,26 @@ type step struct {
 	args map[string]any
 }
 
+// testCatalog is the ai.json used by the tests.
+type testCatalog struct{}
+
+var catalogModels = []usecase.AIModel{
+	{ID: "claude", Label: "Claude", Provider: "claude"},
+	{ID: "deepseek-v4.1-flash", Label: "DeepSeek V4.1 Flash", Provider: "opencode",
+		Model: "opencode-go/deepseek-v4.1-flash"},
+}
+
+func (testCatalog) Get(id string) (usecase.AIModel, bool) {
+	for _, m := range catalogModels {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return usecase.AIModel{}, false
+}
+
+func (testCatalog) List() []usecase.AIModel { return catalogModels }
+
 type fakeRunner struct {
 	mu       sync.Mutex
 	agentURL string
@@ -236,7 +256,8 @@ func newHarness(t *testing.T) *harness {
 		gh: &fakeGitHub{}, wt: settings.WorktreesDir, dir: projectsDir}
 
 	hub := notify.New()
-	h.uc = usecase.New(db, fakeRepoHost{h.git, h.gh}, h.runner, hub, settings)
+	h.uc = usecase.New(db, fakeRepoHost{h.git, h.gh},
+		map[string]usecase.AI{"claude": h.runner, "opencode": h.runner}, testCatalog{}, hub, settings)
 
 	e := echo.New()
 	rest.Register(e, h.uc, hub)
@@ -286,6 +307,14 @@ func (h *harness) createTask(title string, mode domain.Mode) domain.Task {
 		h.t.Fatal(err)
 	}
 	return task
+}
+
+func (h *harness) setAI(dev, review string, separate bool) {
+	h.t.Helper()
+	body := map[string]any{"dev_ai": dev, "review_ai": review, "separate_review": separate}
+	if code := h.rest("PUT", "/ai/setting", body, nil); code != 200 {
+		h.t.Fatalf("PUT /ai/setting = %d", code)
+	}
 }
 
 // rest sends a request and decodes the JSON response into out. It returns the status code.
