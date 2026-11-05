@@ -21,33 +21,63 @@ func NewGitHub() *GitHub {
 	return &GitHub{cmd: command{timeout: 60 * time.Second}}
 }
 
+// ghCheck is one entry of statusCheckRollup: a check run (Actions) or a commit status.
 type ghCheck struct {
-	Name   string `json:"name"`
-	Bucket string `json:"bucket"` // pass, fail, pending, skipping, cancel
-	Link   string `json:"link"`
+	Typename   string `json:"__typename"` // CheckRun or StatusContext
+	Name       string `json:"name"`       // CheckRun
+	Status     string `json:"status"`     // CheckRun: QUEUED, IN_PROGRESS, COMPLETED, ...
+	Conclusion string `json:"conclusion"` // CheckRun: SUCCESS, FAILURE, NEUTRAL, SKIPPED, CANCELLED, ...
+	DetailsURL string `json:"detailsUrl"` // CheckRun
+	Context    string `json:"context"`    // StatusContext
+	State      string `json:"state"`      // StatusContext: PENDING, EXPECTED, SUCCESS, FAILURE, ERROR
+	TargetURL  string `json:"targetUrl"`  // StatusContext
+}
+
+// bucket sorts a check into pending, pass or fail.
+func (c ghCheck) bucket() string {
+	if c.Typename == "StatusContext" {
+		switch c.State {
+		case "SUCCESS":
+			return "pass"
+		case "FAILURE", "ERROR":
+			return "fail"
+		default:
+			return "pending"
+		}
+	}
+	if c.Status != "COMPLETED" {
+		return "pending"
+	}
+	switch c.Conclusion {
+	case "SUCCESS", "NEUTRAL", "SKIPPED":
+		return "pass"
+	default:
+		return "fail"
+	}
 }
 
 func (g *GitHub) CI(ctx context.Context, fullName string, number int) (irepository.CIResult, error) {
-	// gh pr checks exits non-zero while checks are pending or failing, so the output decides.
-	out, runErr := g.cmd.output(ctx, "", "gh", "pr", "checks", strconv.Itoa(number), "--repo", fullName,
-		"--json", "name,bucket,link")
-	var checks []ghCheck
-	if err := json.Unmarshal([]byte(out), &checks); err != nil {
-		if strings.Contains(fmt.Sprint(runErr), "no checks reported") {
-			return irepository.CIResult{State: irepository.CIPending}, nil
-		}
-		return irepository.CIResult{}, fmt.Errorf("read checks: %v", runErr)
+	// gh pr view, not gh pr checks: the gh in Ubuntu's archive (2.45) has no gh pr checks --json.
+	out, err := g.cmd.output(ctx, "", "gh", "pr", "view", strconv.Itoa(number), "--repo", fullName, "--json", "statusCheckRollup")
+	if err != nil {
+		return irepository.CIResult{}, err
 	}
-	if len(checks) == 0 {
+	var v struct {
+		StatusCheckRollup []ghCheck `json:"statusCheckRollup"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return irepository.CIResult{}, fmt.Errorf("read checks: %w", err)
+	}
+	if len(v.StatusCheckRollup) == 0 {
 		return irepository.CIResult{State: irepository.CIPending}, nil
 	}
 	var failed []string
-	for _, c := range checks {
-		switch c.Bucket {
+	for _, c := range v.StatusCheckRollup {
+		switch c.bucket() {
 		case "pending":
 			return irepository.CIResult{State: irepository.CIPending}, nil
-		case "fail", "cancel":
-			failed = append(failed, fmt.Sprintf("- %s: %s", c.Name, c.Link))
+		case "fail":
+			failed = append(failed, fmt.Sprintf("- %s%s: %s%s", c.Name, c.Context, c.DetailsURL, c.TargetURL))
 		}
 	}
 	if len(failed) == 0 {
