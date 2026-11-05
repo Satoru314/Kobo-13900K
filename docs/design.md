@@ -161,7 +161,17 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 | メソッド | パス | 内容 |
 |---|---|---|
 | GET | `/` | GUI（状態一覧の画面） |
+| GET | `/events` | 変更通知（SSE）。GUI が開いている間つなぎっぱなしにする |
 | GET | `/health` | 生存確認 |
+
+### 変更通知（SSE）
+
+バックエンドでの変更を、GUI にすぐ反映する。
+
+- `GET /events` は `text/event-stream` で、task が変わるたびに `{"task_id": 15}` を流す。中身は ID だけで、GUI はその task を `GET /tasks/{id}` で取り直す（データの形は REST の1つだけにする）
+- 配るのは usecase の notifier。task を変える usecase（task / queue / completion / ci / pr）が、トランザクションのコミット後に呼ぶ。kobo は1プロセスなので、プロセス内で購読者ごとのチャネルに配るだけでよい
+- GUI は `EventSource` でつなぐ。切れたら自動でつなぎ直し、つなぎ直したときは一覧を丸ごと取り直す（切れている間の通知は追わない）
+- 経過時間などの時間で変わる表示は、サーバーから流さず GUI が数える
 
 ### システム内部
 
@@ -382,6 +392,7 @@ Kobo-13900K/
 │       │   │   ├── task.go        /tasks 系（一覧・詳細・events・発行・編集・cancel・retry）
 │       │   │   ├── project.go     /projects
 │       │   │   ├── queue.go       /queue
+│       │   │   ├── events.go      /events（SSE）
 │       │   │   └── health.go      /health
 │       │   ├── mcp/
 │       │   │   ├── server.go      ツール名とハンドラの対応表
@@ -411,7 +422,8 @@ Kobo-13900K/
 │       │   ├── queue.go           次のタスクを取り出して実行する
 │       │   ├── completion.go      AI の完了通知・進められない報告の反映
 │       │   ├── ci.go              CI 結果の反映（成功 → reviewing、失敗 → fix、周回の判定）
-│       │   └── pr.go              マージ・クローズの反映
+│       │   ├── pr.go              マージ・クローズの反映
+│       │   └── signal.go          キューの合図、実行中の AI、変更通知の配信
 │       │
 │       ├── domain/
 │       │   ├── task.go            Task、Status、Mode、status の遷移ルール
