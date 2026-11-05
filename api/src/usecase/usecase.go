@@ -25,6 +25,8 @@ type Settings struct {
 	RetryDelay     time.Duration
 	// OffPeak is when off_peak tasks may start.
 	OffPeak OffPeakWindow
+	// ShotsRepo is the owner/name of the repository that holds PR screenshots.
+	ShotsRepo string
 }
 
 type Usecase struct {
@@ -39,5 +41,5 @@ type Usecase struct {
 
 func New(db DB, repo RepoHost, ai AI, notify Notifier, settings Settings) *Usecase {
 	return &Usecase{db: db, repo: repo, ai: ai, notify: notify, settings: settings,
-		prompts: prompts{maxRounds: settings.MaxReviewRounds}}
+		prompts: prompts{maxRounds: settings.MaxReviewRounds, shotsRepo: settings.ShotsRepo}}
 }

@@ -177,7 +177,7 @@ func (u *Usecase) prompt(ctx context.Context, r run) (string, error) {
 	if len(rounds) == 0 {
 		return "", fmt.Errorf("task %d is in fix without a review round", r.task.ID)
 	}
-	return u.prompts.fix(pr, r.workDir, rounds[len(rounds)-1]), nil
+	return u.prompts.fix(r.task, r.project, pr, r.workDir, rounds[len(rounds)-1]), nil
 }
 
 // execute creates the worktree, runs the AI until it reports back, exits or

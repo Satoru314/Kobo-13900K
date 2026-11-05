@@ -10,6 +10,18 @@ import (
 // prompts builds the text handed to the AI. The wording is in docs/design.md.
 type prompts struct {
 	maxRounds int
+	shotsRepo string
+}
+
+// screenshots is the section shared by the develop and fix prompts. postTo says where the image goes.
+func (p prompts) screenshots(t domain.Task, pj domain.Project, postTo string) string {
+	return fmt.Sprintf(`# スクリーンショット
+- 画面の見た目や操作が変わる変更をしたら、変更後の画面をブラウザで開いてスクリーンショットを撮る。どの画面をどの画面サイズで撮るかは自分で決める
+- 撮った画像を %[1]s の main ブランチの %[2]s/task-%[3]d-<連番>.png に置いて push する。連番は 1 から始め、すでにある番号は上書きせず続きの番号を使う
+- %[1]s は作業ディレクトリの外の一時ディレクトリに clone してよい（ここだけは作業ディレクトリの外に出てよい）
+- %[4]sに、![説明](https://github.com/%[1]s/blob/main/%[2]s/task-%[3]d-<連番>.png?raw=true) の形で画像を貼る
+- 画面に関わらない変更なら撮らない
+`, p.shotsRepo, pj.Name, t.ID, postTo)
 }
 
 func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) string {
@@ -29,6 +41,7 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 - 画面の動作確認は Playwright のブラウザで行う
 - 終わったら push し、%[3]s 向けの PR を gh で作る
 
+%[7]s
 # PR の本文
 - 何をしたか
 - 自分で判断して決めたこと（仕様が書かれていなかった所、複数の選択肢から選んだ所）と、その理由。なければ「なし」
@@ -38,10 +51,10 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 - PR を作ったら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
 - 進められない場合（仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo-agent の report_blocked ツールを呼び、理由を書く
 - どちらかを呼んだら、それ以上は何もしない
-`, workDir, fullName(pj), pj.DefaultBranch, branch(t), t.Title, t.Description)
+`, workDir, fullName(pj), pj.DefaultBranch, branch(t), t.Title, t.Description, p.screenshots(t, pj, "PR の本文"))
 }
 
-func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewRound) string {
+func (p prompts) fix(t domain.Task, pj domain.Project, pr domain.PullRequest, workDir string, round domain.ReviewRound) string {
 	kind := "レビューの指摘"
 	if round.Result == domain.ReviewCIFailed {
 		kind = "CI の失敗"
@@ -58,11 +71,12 @@ func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewR
 - PR に、何をどう直したか、自分で判断して決めたことをコメントで書く
 - 画面の動作確認は Playwright のブラウザで行う
 
+%[6]s
 # 終わり方
 - push したら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
 - 進められない場合は kobo-agent の report_blocked ツールを呼ぶ
 - どちらかを呼んだら、それ以上は何もしない
-`, pr.URL, kind, workDir, pr.Branch, round.Comments)
+`, pr.URL, kind, workDir, pr.Branch, round.Comments, p.screenshots(t, pj, "PR のコメント"))
 }
 
 func (p prompts) review(t domain.Task, pr domain.PullRequest, workDir string, roundNo int) string {
@@ -85,6 +99,7 @@ PR: %[1]s（%[2]d 周目 / 最大 %[3]d 周）
 - PR に書かれた「自分で判断して決めたこと」が妥当か
 - 好みの問題や細かい書き方は指摘しない。直さないとマージできないものだけを指摘する
 - 画面の動作確認は Playwright のブラウザで行う
+- 画面を変える PR で、スクリーンショットがないために動作確認の手間が大きくなる場合は、スクリーンショットを求める指摘をする
 %[7]s
 # 書き方
 - 指摘は gh で PR のレビューコメントとして書く（該当する行に付けられるものは行に付ける）
