@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -43,8 +44,12 @@ func run() error {
 		return err
 	}
 	defer pg.Close()
-	if err := pg.Migrate(ctx); err != nil {
+	pending, err := pg.PendingMigrations(ctx)
+	if err != nil {
 		return err
+	}
+	if len(pending) > 0 {
+		return fmt.Errorf("migrations not applied: %v; run make migrate", pending)
 	}
 	tasks := repository.NewTaskRepository(pg)
 	projectRepo := repository.NewProjectRepository(pg)

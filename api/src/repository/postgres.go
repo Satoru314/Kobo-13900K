@@ -5,14 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Satoru314/Kobo-13900K/api/migrations"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
@@ -75,47 +72,6 @@ const queueLockKey = 0x6b6f626f
 func (p *Postgres) LockQueue(ctx context.Context) error {
 	_, err := p.conn(ctx).Exec(ctx, "SELECT pg_advisory_xact_lock($1)", queueLockKey)
 	return err
-}
-
-// Migrate applies the embedded SQL files that have not been applied yet, in name order.
-func (p *Postgres) Migrate(ctx context.Context) error {
-	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
-		return err
-	}
-	names, err := fs.Glob(migrations.FS, "*.sql")
-	if err != nil {
-		return err
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if err := p.applyMigration(ctx, name); err != nil {
-			return fmt.Errorf("migration %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-func (p *Postgres) applyMigration(ctx context.Context, name string) error {
-	return p.InTx(ctx, func(ctx context.Context) error {
-		var exists bool
-		if err := p.conn(ctx).QueryRow(ctx,
-			"SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)", name).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return nil
-		}
-		sql, err := fs.ReadFile(migrations.FS, name)
-		if err != nil {
-			return err
-		}
-		if _, err := p.conn(ctx).Exec(ctx, string(sql)); err != nil {
-			return err
-		}
-		_, err = p.conn(ctx).Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", name)
-		return err
-	})
 }
 
 // TruncateAll empties every table. Only the tests use it.
