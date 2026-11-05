@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -18,6 +19,8 @@ type Config struct {
 	OffPeak     domain.OffPeakWindow
 	Settings    usecase.Settings
 }
+
+var ownerRepo = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)
 
 // envReader reads KOBO_* variables, collecting the first error.
 type envReader struct {
@@ -66,7 +69,11 @@ func LoadConfig() (Config, error) {
 			ReviewTimeout:   r.duration("KOBO_REVIEW_TIMEOUT", "30m"),
 			MaxAutoRetries:  r.int("KOBO_MAX_AUTO_RETRIES", "2"),
 			RetryDelay:      r.duration("KOBO_RETRY_DELAY", "1m"),
+			ShotsRepo:       r.str("KOBO_SHOTS_REPO", ""),
 		},
+	}
+	if v := c.Settings.ShotsRepo; v != "" && !ownerRepo.MatchString(v) && r.err == nil {
+		r.err = fmt.Errorf("KOBO_SHOTS_REPO: %q is not owner/name", v)
 	}
 	window, err := domain.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
 	if err != nil && r.err == nil {

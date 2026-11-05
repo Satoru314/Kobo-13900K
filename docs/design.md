@@ -223,6 +223,13 @@ Kobo が AI を起動・resume するときに渡す文章。`{...}` は Kobo �
 - 画面の動作確認は Playwright のブラウザで行う
 - 終わったら push し、{default_branch} 向けの PR を gh で作る
 
+# スクリーンショット
+- 画面の見た目や操作が変わる変更をしたら、変更後の画面をブラウザで開いてスクリーンショットを撮る。どの画面をどの画面サイズで撮るかは自分で決める
+- 撮った画像を {shots_repo} の main ブランチの {name}/task-{task_id}-<連番>.png に置いて push する。連番は 1 から始め、すでにある番号は上書きせず続きの番号を使う
+- {shots_repo} は作業ディレクトリの外の一時ディレクトリに clone してよい（ここだけは作業ディレクトリの外に出てよい）
+- PR の本文に、![説明](https://github.com/{shots_repo}/blob/main/{name}/task-{task_id}-<連番>.png?raw=true) の形で画像を貼る
+- 画面に関わらない変更なら撮らない
+
 # PR の本文
 - 何をしたか
 - 自分で判断して決めたこと（仕様が書かれていなかった所、複数の選択肢から選んだ所）と、その理由。なければ「なし」
@@ -249,6 +256,13 @@ PR {pr_url} に次の指摘がありました。対応してください。
 - PR に、何をどう直したか、自分で判断して決めたことをコメントで書く
 - 画面の動作確認は Playwright のブラウザで行う
 
+# スクリーンショット
+- 画面の見た目や操作が変わる変更をしたら、変更後の画面をブラウザで開いてスクリーンショットを撮る。どの画面をどの画面サイズで撮るかは自分で決める
+- 撮った画像を {shots_repo} の main ブランチの {name}/task-{task_id}-<連番>.png に置いて push する。連番は 1 から始め、すでにある番号は上書きせず続きの番号を使う
+- {shots_repo} は作業ディレクトリの外の一時ディレクトリに clone してよい（ここだけは作業ディレクトリの外に出てよい）
+- PR のコメントに、![説明](https://github.com/{shots_repo}/blob/main/{name}/task-{task_id}-<連番>.png?raw=true) の形で画像を貼る
+- 画面に関わらない変更なら撮らない
+
 # 終わり方
 - push したら complete_development を呼ぶ
 - 進められない場合は report_blocked を呼ぶ
@@ -270,6 +284,7 @@ PR: {pr_url}（{round_no} 周目 / 最大 {max_rounds} 周）
 - PR に書かれた「自分で判断して決めたこと」が妥当か
 - 好みの問題や細かい書き方は指摘しない。直さないとマージできないものだけを指摘する
 - 画面の動作確認は Playwright のブラウザで行う
+- 画面を変える PR で、スクリーンショットがないために動作確認の手間が大きくなる場合は、スクリーンショットを求める指摘をする
 
 # 書き方
 - 指摘は gh で PR のレビューコメントとして書く（該当する行に付けられるものは行に付ける）
@@ -381,6 +396,33 @@ erDiagram
 - CT102 の satoru314 を docker グループに入れる（root が必要）
 - CT102 で Docker を動かすため、CT の nesting が有効か確認する
 
+### 設定
+
+環境変数で渡す。既定値のないものが未設定なら kobo は起動しない。
+
+| 環境変数 | 既定値 | 内容 |
+|---|---|---|
+| `KOBO_DATABASE_URL` | なし（必須） | Postgres の接続先 |
+| `KOBO_SHOTS_REPO` | なし（必須） | スクリーンショットを置く非公開リポジトリ。`owner/name` の形（例: `Satoru314/kobo-shots`） |
+| `KOBO_LISTEN` | `127.0.0.1:8787` | HTTP の待ち受け |
+| `KOBO_CLAUDE_BIN` | `claude` | claude CLI のパス |
+| `KOBO_LOG_DIR` | `~/.kobo/logs` | ログの置き場所 |
+| `KOBO_PROJECTS_DIR` | `~/programF` | 対象リポジトリを置くディレクトリ |
+| `KOBO_WORKTREES_DIR` | `~/.kobo/worktrees` | worktree を作るディレクトリ |
+| `KOBO_OFF_PEAK` | `01:00-07:00` | off_peak の時間帯 |
+| `KOBO_MAX_REVIEW_ROUNDS` | `2` | レビューの上限回数 |
+| `KOBO_DEV_TIMEOUT` | `60m` | 開発と fix の実行時間の上限 |
+| `KOBO_REVIEW_TIMEOUT` | `30m` | レビューの実行時間の上限 |
+| `KOBO_MAX_AUTO_RETRIES` | `2` | システムエラーで自動再実行する回数 |
+| `KOBO_RETRY_DELAY` | `1m` | 自動再実行までの待ち |
+
+### スクリーンショットの置き場所
+
+- 画面を変えた PR のスクリーンショットは、`KOBO_SHOTS_REPO` のリポジトリの main ブランチに置く
+- 置く場所は `<対象リポジトリ名>/task-<番号>-<連番>.png`（例: `Kobo-13900K/task-2-1.png`）
+- PR には `https://github.com/<KOBO_SHOTS_REPO>/blob/main/<パス>?raw=true` で貼る
+- 撮る・置く・貼るのは AI の仕事で、kobo は指示文でリポジトリ名を伝えるだけ
+
 ## ファイル配置
 
 テストファイル（`_test.go`）は各ファイルの隣に置く。
@@ -395,7 +437,7 @@ Kobo-13900K/
 │   └── src/
 │       ├── cmd/kobo/
 │       │   ├── main.go            組み立て、HTTP サーバーと worker の起動、停止
-│       │   └── config.go          設定の読み込み（DB、ポート、~/programF の場所、off_peak の時間帯、レビューの上限回数）
+│       │   └── config.go          設定の読み込み（DB、ポート、~/programF の場所、off_peak の時間帯、レビューの上限回数、スクリーンショットのリポジトリ）
 │       │
 │       ├── controller/
 │       │   ├── iusecase/          controller が使う usecase のインターフェース

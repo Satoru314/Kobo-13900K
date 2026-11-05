@@ -223,6 +223,7 @@ func newHarness(t *testing.T) *harness {
 	settings := usecase.Settings{
 		ProjectsDir: projectsDir, WorktreesDir: t.TempDir(), MaxReviewRounds: 2,
 		DevTimeout: 3 * time.Second, ReviewTimeout: 3 * time.Second, MaxAutoRetries: 2, RetryDelay: 0,
+		ShotsRepo: "acme/shots",
 	}
 	h := &harness{t: t, ctx: ctx, runner: &fakeRunner{}, git: &fakeGit{worktrees: map[string]string{}},
 		gh: &fakeGitHub{}, wt: settings.WorktreesDir, dir: projectsDir}

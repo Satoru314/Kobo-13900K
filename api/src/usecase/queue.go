@@ -42,7 +42,7 @@ func NewQueueUsecase(tx irepository.Transactor, tasks irepository.TaskRepository
 	return &QueueUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events,
 		projects: projects, runner: runner, git: git, queue: queue, settings: settings, active: active, signal: signal,
 		changes: changes,
-		track:   newTracker(tasks, events), prompts: prompts{maxRounds: settings.MaxReviewRounds}}
+		track:   newTracker(tasks, events), prompts: prompts{maxRounds: settings.MaxReviewRounds, shotsRepo: settings.ShotsRepo}}
 }
 
 // Order lists the waiting tasks in the order they will run.
@@ -181,7 +181,7 @@ func (u *QueueUsecase) prompt(ctx context.Context, run Run) (string, error) {
 	if len(rounds) == 0 {
 		return "", fmt.Errorf("task %d is in fix without a review round", run.Task.ID)
 	}
-	return u.prompts.fix(pr, run.WorkDir, rounds[len(rounds)-1]), nil
+	return u.prompts.fix(run.Task, run.Project, pr, run.WorkDir, rounds[len(rounds)-1]), nil
 }
 
 // Execute creates the worktree, runs the AI until it reports back, exits or times out,
