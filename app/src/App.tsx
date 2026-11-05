@@ -94,7 +94,7 @@ export function App() {
         </div>
         {error && <span style={{ fontSize: 13, fontWeight: 600, color: '#cf222e' }}>{error}</span>}
       </header>
-      <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: 'clip', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
+      <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: 'clip', isolation: 'isolate', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
         {layout && <Board layout={layout} tasks={tasks} open={setSelected} />}
       </main>
       <Composer />
