@@ -32,6 +32,8 @@ type Usecase interface {
 	GetQueueState(ctx context.Context) (domain.QueueState, error)
 	PauseQueue(ctx context.Context) error
 	ResumeQueue(ctx context.Context) error
+	GetAIView(ctx context.Context) (usecase.AIView, error)
+	SetAISetting(ctx context.Context, in usecase.SetAISettingInput, now time.Time) (domain.AISetting, error)
 }
 
 // Changes is where GET /events gets the IDs of changed tasks.
@@ -62,6 +64,8 @@ func Register(e *echo.Echo, uc Usecase, changes Changes) {
 	e.GET("/queue/state", a.getQueueState)
 	e.POST("/queue/pause", a.pauseQueue)
 	e.POST("/queue/resume", a.resumeQueue)
+	e.GET("/ai", a.getAI)
+	e.PUT("/ai/setting", a.setAISetting)
 	e.GET("/events", a.events)
 	e.GET("/health", a.health)
 }

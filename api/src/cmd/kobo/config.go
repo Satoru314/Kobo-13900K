@@ -4,19 +4,23 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
 type Config struct {
-	DatabaseURL string
-	Listen      string
-	ClaudeBin   string
-	LogDir      string
-	Settings    usecase.Settings
+	DatabaseURL   string
+	Listen        string
+	LogDir        string
+	AIConfigPath  string
+	Browser       bool
+	PlaywrightMCP string
+	Settings      usecase.Settings
 }
 
 var ownerRepo = regexp.MustCompile(`^[\w.-]+/[\w.-]+$`)
@@ -52,17 +56,46 @@ func (r *envReader) int(key, def string) int {
 	return n
 }
 
+func (r *envReader) bool(key, def string) bool {
+	v := strings.ToLower(r.str(key, def))
+	switch v {
+	case "on", "true", "1", "yes":
+		return true
+	case "off", "false", "0", "no":
+		return false
+	}
+	if r.err == nil {
+		r.err = fmt.Errorf("%s: want on or off, got %q", key, v)
+	}
+	return false
+}
+
+// expandHome lets the config file and directories be written as ~/....
+func expandHome(path string) string {
+	if path == "~" {
+		home, _ := os.UserHomeDir()
+		return home
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
 func LoadConfig() (Config, error) {
 	home, _ := os.UserHomeDir()
 	r := &envReader{}
 	c := Config{
-		DatabaseURL: r.str("KOBO_DATABASE_URL", ""),
-		Listen:      r.str("KOBO_LISTEN", "127.0.0.1:8787"),
-		ClaudeBin:   r.str("KOBO_CLAUDE_BIN", "claude"),
-		LogDir:      r.str("KOBO_LOG_DIR", home+"/.kobo/logs"),
+		DatabaseURL:   r.str("KOBO_DATABASE_URL", ""),
+		Listen:        r.str("KOBO_LISTEN", "127.0.0.1:8787"),
+		LogDir:        expandHome(r.str("KOBO_LOG_DIR", home+"/.kobo/logs")),
+		AIConfigPath:  expandHome(r.str("KOBO_AI_CONFIG", "")),
+		Browser:       r.bool("KOBO_BROWSER", "on"),
+		PlaywrightMCP: expandHome(r.str("KOBO_PLAYWRIGHT_MCP_BIN", "playwright-mcp")),
 		Settings: usecase.Settings{
-			ProjectsDir:     r.str("KOBO_PROJECTS_DIR", home+"/programF"),
-			WorktreesDir:    r.str("KOBO_WORKTREES_DIR", home+"/.kobo/worktrees"),
+			ProjectsDir:     expandHome(r.str("KOBO_PROJECTS_DIR", home+"/programF")),
+			WorktreesDir:    expandHome(r.str("KOBO_WORKTREES_DIR", home+"/.kobo/worktrees")),
 			MaxReviewRounds: r.int("KOBO_MAX_REVIEW_ROUNDS", "2"),
 			DevTimeout:      r.duration("KOBO_DEV_TIMEOUT", "60m"),
 			ReviewTimeout:   r.duration("KOBO_REVIEW_TIMEOUT", "30m"),

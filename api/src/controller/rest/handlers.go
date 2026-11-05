@@ -163,6 +163,26 @@ func (a *API) resumeQueue(c echo.Context) error {
 	return c.JSON(http.StatusOK, schema.QueueState{Paused: false})
 }
 
+func (a *API) getAI(c echo.Context) error {
+	view, err := a.uc.GetAIView(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, schema.FromAIView(view))
+}
+
+func (a *API) setAISetting(c echo.Context) error {
+	var req schema.AISettingRequest
+	if err := bind(c, &req); err != nil {
+		return err
+	}
+	setting, err := a.uc.SetAISetting(c.Request().Context(), req.Input(), time.Now())
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, schema.FromAISetting(setting))
+}
+
 // events streams a ChangeEvent for every task change until the client leaves,
 // kobo stops, or the subscription is dropped.
 func (a *API) events(c echo.Context) error {

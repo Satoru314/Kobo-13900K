@@ -37,12 +37,20 @@ func pullRequestFromModel(m model.PullRequest) domain.PullRequest {
 
 func sessionToModel(s domain.Session) model.Session {
 	return model.Session{ID: s.ID, TaskID: s.TaskID, Role: string(s.Role), Provider: s.Provider,
-		ExternalSessionID: s.ExternalSessionID, CreatedAt: s.CreatedAt}
+		AI: s.AI, Model: s.Model, ExternalSessionID: s.ExternalSessionID, CreatedAt: s.CreatedAt}
 }
 
 func sessionFromModel(m model.Session) domain.Session {
 	return domain.Session{ID: m.ID, TaskID: m.TaskID, Role: domain.Role(m.Role), Provider: m.Provider,
-		ExternalSessionID: m.ExternalSessionID, CreatedAt: m.CreatedAt}
+		AI: m.AI, Model: m.Model, ExternalSessionID: m.ExternalSessionID, CreatedAt: m.CreatedAt}
+}
+
+func aiSettingToModel(s domain.AISetting) model.AISetting {
+	return model.AISetting{ID: 1, DevAI: s.DevAI, ReviewAI: s.ReviewAI, SeparateReview: s.SeparateReview, UpdatedAt: s.UpdatedAt}
+}
+
+func aiSettingFromModel(m model.AISetting) domain.AISetting {
+	return domain.AISetting{DevAI: m.DevAI, ReviewAI: m.ReviewAI, SeparateReview: m.SeparateReview, UpdatedAt: m.UpdatedAt}
 }
 
 func reviewRoundToModel(r domain.ReviewRound) model.ReviewRound {

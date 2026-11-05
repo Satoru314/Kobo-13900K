@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,65 +11,58 @@ import (
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
-type mcpEntry struct {
+type claudeMCPEntry struct {
+	Type    string            `json:"type"`
+	URL     string            `json:"url"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
 }
 
-// runnerEnv is a machine with a fake claude that records its arguments, and no
-// node: PATH holds only a shell. HOME is empty, so bash reads no rc file.
 type runnerEnv struct {
-	t      *testing.T
-	root   string
-	runner *ClaudeRunner
+	t       *testing.T
+	root    string
+	runner  *ClaudeRunner
+	browser string // the configured playwright-mcp path, empty when disabled
 }
 
-func newRunnerEnv(t *testing.T) *runnerEnv {
+func newRunnerEnv(t *testing.T, withBrowser bool) *runnerEnv {
 	t.Helper()
 	root := t.TempDir()
 	tools := filepath.Join(root, "tools")
 	mustMkdir(t, tools)
-	for _, name := range []string{"sh", "bash"} {
-		real, err := exec.LookPath(name)
-		if err != nil {
-			t.Skipf("%s is not available", name)
-		}
-		if err := os.Symlink(real, filepath.Join(tools, name)); err != nil {
-			t.Fatal(err)
-		}
+	claude := filepath.Join(tools, "claude")
+	writeScript(t, claude, `for a in "$@"; do printf '%s\n' "$a"; done > "`+root+`/claude.args"`)
+
+	var browser *playwright
+	browserPath := ""
+	if withBrowser {
+		browserPath = filepath.Join(tools, "playwright-mcp")
+		writeScript(t, browserPath, "exit 0")
+		browser = NewPlaywright(browserPath)
 	}
-	mustMkdir(t, filepath.Join(root, "home"))
-	t.Setenv("HOME", filepath.Join(root, "home"))
-	t.Setenv("PATH", tools)
-	writeScript(t, filepath.Join(tools, "claude"), `for a in "$@"; do printf '%s\n' "$a"; done > "`+root+`/claude.args"`)
-	return &runnerEnv{t: t, root: root,
-		runner: NewClaudeRunner("claude", "http://127.0.0.1:1/mcp/agent", filepath.Join(root, "logs"))}
+	return &runnerEnv{t: t, root: root, browser: browserPath,
+		runner: NewClaudeRunner(claude, "http://127.0.0.1:1/mcp/agent", filepath.Join(root, "logs"), browser)}
 }
 
-// fakeNpx puts an npx in dir that records its calls and exits with code.
-func (e *runnerEnv) fakeNpx(dir string, code string) string {
+func (e *runnerEnv) run(req usecase.RunRequest) []string {
 	e.t.Helper()
-	mustMkdir(e.t, dir)
-	npx := filepath.Join(dir, "npx")
-	writeScript(e.t, npx, `[ "$1" = --version ] || printf '%s\n' "$*" >> "`+e.root+`/npx.calls"
-exit `+code)
-	return npx
-}
-
-func (e *runnerEnv) run() map[string]mcpEntry {
-	e.t.Helper()
-	err := e.runner.Run(context.Background(), usecase.RunRequest{
-		SessionID: "s", WorkDir: e.root, Prompt: "p", LogName: "task-1",
-	})
-	if err != nil {
+	req.SessionID = defaultString(req.SessionID, "s")
+	req.WorkDir = e.root
+	req.Prompt = defaultString(req.Prompt, "p")
+	req.LogName = defaultString(req.LogName, "task-1")
+	if err := e.runner.Run(context.Background(), req); err != nil {
 		e.t.Fatal(err)
 	}
-	args := strings.Split(readFile(e.t, filepath.Join(e.root, "claude.args")), "\n")
+	return strings.Split(strings.TrimSpace(readFile(e.t, filepath.Join(e.root, "claude.args"))), "\n")
+}
+
+func (e *runnerEnv) servers(args []string) map[string]claudeMCPEntry {
+	e.t.Helper()
 	for i, a := range args {
 		if a == "--mcp-config" {
 			var cfg struct {
-				McpServers map[string]mcpEntry `json:"mcpServers"`
+				McpServers map[string]claudeMCPEntry `json:"mcpServers"`
 			}
 			if err := json.Unmarshal([]byte(args[i+1]), &cfg); err != nil {
 				e.t.Fatal(err)
@@ -82,103 +74,59 @@ func (e *runnerEnv) run() map[string]mcpEntry {
 	return nil
 }
 
-func (e *runnerEnv) npxCalls() []string {
-	e.t.Helper()
-	b, err := os.ReadFile(filepath.Join(e.root, "npx.calls"))
-	if os.IsNotExist(err) {
-		return nil
+func defaultString(v, def string) string {
+	if v == "" {
+		return def
 	}
-	if err != nil {
-		e.t.Fatal(err)
-	}
-	return strings.Split(strings.TrimSpace(string(b)), "\n")
+	return v
 }
 
-func TestRunPassesHeadlessChromiumAndInstallsItOnce(t *testing.T) {
-	e := newRunnerEnv(t)
-	tools := os.Getenv("PATH")
-	npx := e.fakeNpx(tools, "0")
-
-	servers := e.run()
-	if _, ok := servers["kobo-agent"]; !ok {
-		t.Errorf("the agent server is missing: %v", servers)
+func TestRunPassesAgentAndBrowser(t *testing.T) {
+	e := newRunnerEnv(t, true)
+	args := e.run(usecase.RunRequest{})
+	servers := e.servers(args)
+	if servers["kobo-agent"].URL != "http://127.0.0.1:1/mcp/agent" {
+		t.Errorf("agent server = %+v", servers["kobo-agent"])
 	}
-	pw, ok := servers["playwright"]
+	pw, ok := servers["kobo-playwright"]
 	if !ok {
-		t.Fatalf("the playwright server is missing: %v", servers)
+		t.Fatalf("playwright server missing: %+v", servers)
 	}
-	if pw.Command != npx {
-		t.Errorf("command = %q, want %q", pw.Command, npx)
+	if pw.Command != e.browser {
+		t.Errorf("command = %q, want %q", pw.Command, e.browser)
 	}
 	joined := strings.Join(pw.Args, " ")
 	output := filepath.Join(e.root, "logs", "playwright", "task-1")
-	for _, want := range []string{playwrightMCP, "--headless", "--browser chromium", "--output-dir " + output} {
+	for _, want := range []string{"--headless", "--browser chromium", "--isolated", "--output-dir " + output} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args %q do not contain %q", joined, want)
 		}
 	}
+}
 
-	e.run()
-	install := "-y -p " + playwrightMCP + " playwright install chromium"
-	if calls := e.npxCalls(); len(calls) != 1 || calls[0] != install {
-		t.Errorf("npx calls = %q, want one %q", calls, install)
+func TestRunWithoutBrowserLeavesPlaywrightOut(t *testing.T) {
+	e := newRunnerEnv(t, false)
+	servers := e.servers(e.run(usecase.RunRequest{}))
+	if _, ok := servers["kobo-playwright"]; ok {
+		t.Errorf("playwright should be absent: %+v", servers)
 	}
 }
 
-// Under systemd node is only on the PATH the user's shell rc sets up.
-func TestRunFindsNpxThroughInteractiveShell(t *testing.T) {
-	e := newRunnerEnv(t)
-	nodeBin := filepath.Join(e.root, "nvm", "bin")
-	npx := e.fakeNpx(nodeBin, "0")
-	rc := `echo noise from the rc file
-export PATH="` + nodeBin + `:$PATH"
-`
-	if err := os.WriteFile(filepath.Join(e.root, "home", ".bashrc"), []byte(rc), 0o644); err != nil {
-		t.Fatal(err)
+func TestRunUsesTheSessionModelAndResume(t *testing.T) {
+	e := newRunnerEnv(t, false)
+	args := e.run(usecase.RunRequest{Model: "claude-sonnet-5-5"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model claude-sonnet-5-5") {
+		t.Errorf("args = %v", args)
+	}
+	if !strings.Contains(joined, "--session-id s") {
+		t.Errorf("new session args = %v", args)
 	}
 
-	pw, ok := e.run()["playwright"]
-	if !ok {
-		t.Fatal("the playwright server is missing")
-	}
-	if pw.Command != npx {
-		t.Errorf("command = %q, want %q", pw.Command, npx)
-	}
-	if !strings.HasPrefix(pw.Env["PATH"], nodeBin+":") {
-		t.Errorf("env PATH = %q, want it to start with %q", pw.Env["PATH"], nodeBin)
-	}
-}
-
-func TestRunGoesOnWithoutBrowserWhenNpxIsMissing(t *testing.T) {
-	e := newRunnerEnv(t)
-	servers := e.run()
-	if _, ok := servers["kobo-agent"]; !ok {
-		t.Errorf("the agent server is missing: %v", servers)
-	}
-	if _, ok := servers["playwright"]; ok {
-		t.Errorf("the playwright server should be left out: %v", servers)
-	}
-	if log := readFile(t, filepath.Join(e.root, "logs", "task-1.log")); !strings.Contains(log, "without the Playwright browser") {
-		t.Errorf("the log does not say why: %q", log)
-	}
-}
-
-func TestRunRetriesInstallAfterFailure(t *testing.T) {
-	e := newRunnerEnv(t)
-	tools := os.Getenv("PATH")
-	writeScript(t, filepath.Join(tools, "npx"), `[ "$1" = --version ] && exit 0
-printf 'x\n' >> "`+e.root+`/npx.calls"
-exit 1`)
-	if _, ok := e.run()["playwright"]; ok {
-		t.Error("the playwright server should be left out while the install fails")
-	}
-
-	e.fakeNpx(tools, "0")
-	if _, ok := e.run()["playwright"]; !ok {
-		t.Error("the playwright server should be back once the install works")
-	}
-	if calls := e.npxCalls(); len(calls) != 2 {
-		t.Errorf("npx calls = %q, want the failed install and the retry", calls)
+	args = e.run(usecase.RunRequest{Model: "claude-sonnet-5-5", Resume: true})
+	joined = strings.Join(args, " ")
+	if !strings.Contains(joined, "--resume s") {
+		t.Errorf("resume args = %v", args)
 	}
 }
 

@@ -81,5 +81,8 @@ func (d *DB) TruncateAll(ctx context.Context) error {
 	if err := d.gorm.WithContext(ctx).Exec("TRUNCATE event, review_round, session, pull_request, task, project RESTART IDENTITY CASCADE").Error; err != nil {
 		return err
 	}
-	return d.gorm.WithContext(ctx).Exec("UPDATE queue_state SET paused = false").Error
+	if err := d.gorm.WithContext(ctx).Exec("UPDATE queue_state SET paused = false").Error; err != nil {
+		return err
+	}
+	return d.gorm.WithContext(ctx).Exec("UPDATE ai_setting SET dev_ai = 'claude', review_ai = 'claude', separate_review = false, updated_at = now()").Error
 }

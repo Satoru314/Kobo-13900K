@@ -46,14 +46,16 @@ func (u *Usecase) ResumeQueue(ctx context.Context) error {
 
 // run is one AI run of a task.
 type run struct {
-	task    domain.Task
-	project domain.Project
-	role    domain.Role
-	session domain.Session
-	resume  bool
-	workDir string
-	prompt  string
-	timeout time.Duration
+	task       domain.Task
+	project    domain.Project
+	role       domain.Role
+	session    domain.Session
+	runner     AI
+	resume     bool
+	workDir    string
+	prompt     string
+	timeout    time.Duration
+	prepareErr error
 }
 
 // RunNext takes the next ready task, runs the AI on it until it reports back,
@@ -64,6 +66,11 @@ func (u *Usecase) RunNext(ctx context.Context, now time.Time) (bool, error) {
 	r, ok, err := u.take(ctx, now)
 	if err != nil || !ok {
 		return false, err
+	}
+	if r.prepareErr != nil {
+		// The task has already been taken out of the queue; put it into error
+		// instead of leaving it running forever.
+		return true, u.settle(ctx, r, r.prepareErr, time.Now())
 	}
 	slog.Info("run started", "task", r.task.ID, "role", r.role, "resume", r.resume)
 	runErr := u.execute(ctx, r)
@@ -102,8 +109,21 @@ func (u *Usecase) take(ctx context.Context, now time.Time) (run, bool, error) {
 			map[string]any{"from": string(from), "to": string(task.Status)}, now); err != nil {
 			return err
 		}
-		if r, err = u.prepare(ctx, task, now); err != nil {
+		r = run{task: task, role: domain.RoleDev, timeout: u.settings.DevTimeout}
+		if task.Status == domain.StatusReviewing {
+			r.role, r.timeout = domain.RoleReview, u.settings.ReviewTimeout
+		}
+		// An AI that is not configured is found before prepare writes anything,
+		// so the task is kept taken and settle moves it to error. Any other
+		// failure rolls the whole take back.
+		prepared, err := u.prepare(ctx, task, now)
+		switch {
+		case errors.Is(err, ErrAIUnavailable):
+			r.prepareErr = err
+		case err != nil:
 			return err
+		default:
+			r = prepared
 		}
 		found = true
 		return nil
@@ -129,10 +149,23 @@ func (u *Usecase) prepare(ctx context.Context, task domain.Task, now time.Time) 
 	session, err := u.db.GetSession(ctx, task.ID, r.role)
 	switch {
 	case err == nil:
-		r.session, r.resume = session, true
+		// Resume must use the AI the session was started with, even after the
+		// settings or the catalog change.
+		runner, ok := u.ais[session.Provider]
+		if !ok {
+			return run{}, fmt.Errorf("%w: provider %q of task %d's %s session is not configured",
+				ErrAIUnavailable, session.Provider, task.ID, r.role)
+		}
+		r.session, r.runner, r.resume = session, runner, true
 	case errors.Is(err, domain.ErrNotFound):
-		r.session = domain.Session{TaskID: task.ID, Role: r.role, Provider: u.ai.Provider(),
-			ExternalSessionID: u.ai.NewSessionID(), CreatedAt: now}
+		model, runner, err := u.sessionAI(ctx, r.role)
+		if err != nil {
+			return run{}, err
+		}
+		r.session = domain.Session{TaskID: task.ID, Role: r.role, AI: model.ID,
+			Provider: model.Provider, Model: model.Model,
+			ExternalSessionID: runner.NewSessionID(), CreatedAt: now}
+		r.runner = runner
 		if err := u.db.CreateSession(ctx, &r.session); err != nil {
 			return run{}, err
 		}
@@ -149,7 +182,8 @@ func (u *Usecase) prepare(ctx context.Context, task domain.Task, now time.Time) 
 	}
 	sid := r.session.ID
 	if err := u.record(ctx, task.ID, &sid, typ, map[string]any{
-		"role": string(r.role), "provider": r.session.Provider, "external_session_id": r.session.ExternalSessionID,
+		"role": string(r.role), "ai": r.session.AI, "provider": r.session.Provider,
+		"model": r.session.Model, "external_session_id": r.session.ExternalSessionID,
 		"work_dir": r.workDir}, now); err != nil {
 		return run{}, err
 	}
@@ -209,8 +243,9 @@ func (u *Usecase) execute(ctx context.Context, r run) error {
 		cancel()
 	}
 
-	err = u.ai.Run(runCtx, RunRequest{
-		Role: r.role, SessionID: r.session.ExternalSessionID, Resume: r.resume,
+	err = r.runner.Run(runCtx, RunRequest{
+		Role: r.role, AI: r.session.AI, Model: r.session.Model,
+		SessionID: r.session.ExternalSessionID, Resume: r.resume,
 		WorkDir: r.workDir, Prompt: r.prompt,
 		LogName: "task-" + strconv.FormatInt(r.task.ID, 10) + "-" + string(r.role),
 	})
@@ -242,6 +277,12 @@ func (u *Usecase) settle(ctx context.Context, r run, runErr error, now time.Time
 		msg := "AI exited without reporting back"
 		if runErr != nil {
 			msg = runErr.Error()
+		}
+		if errors.Is(runErr, ErrAIUnavailable) {
+			if err := u.record(ctx, task.ID, nil, domain.EventSystemError, map[string]any{"message": msg}, now); err != nil {
+				return err
+			}
+			return u.move(ctx, &task, domain.StatusError, msg, now)
 		}
 		return u.fail(ctx, &task, msg, now)
 	})

@@ -44,7 +44,36 @@ export interface TaskDetail {
   project: Project;
   pull_request: PullRequest | null;
   review_rounds: ReviewRound[];
+  sessions: Session[];
   last_error?: string;
+}
+
+export interface Session {
+  role: 'dev' | 'review';
+  ai: string;
+  ai_label: string;
+  provider: string;
+  model: string;
+  created_at: string;
+}
+
+export interface AIModel {
+  id: string;
+  label: string;
+  provider: string;
+  model: string;
+}
+
+export interface AISetting {
+  dev_ai: string;
+  review_ai: string;
+  separate_review: boolean;
+  updated_at?: string;
+}
+
+export interface AIView {
+  models: AIModel[];
+  setting: AISetting;
 }
 
 export interface TaskEvent {
@@ -85,4 +114,7 @@ export const api = {
   projects: () => call<Project[]>('GET', '/projects'),
   candidates: () => call<Candidate[]>('GET', '/projects/candidates'),
   addProject: (dir: string) => call<Project>('POST', '/projects', { dir }),
+  ai: () => call<AIView>('GET', '/ai'),
+  saveAISetting: (setting: Pick<AISetting, 'dev_ai' | 'review_ai' | 'separate_review'>) =>
+    call<AISetting>('PUT', '/ai/setting', setting),
 };
