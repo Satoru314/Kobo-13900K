@@ -1,10 +1,10 @@
-// Fixed layout: every block is a fixed-size box holding task cards; past SLOTS cards it
-// scrolls, so the blocks never move and the arrows between them sit at fixed coordinates.
-export const CARD = 57, HDR = 32, GAP = 48, SLOTS = 4, COL = 400, GUTTER = 64;
-export const BOX_H = 2 + HDR + SLOTS * CARD;
-export const BOARD_W = 3 * COL + 2 * GUTTER;
-export const BOARD_H = 2 * BOX_H + GAP;
-export const LABEL_TOP = 1 + HDR + CARD / 2;
+// The board fills the space it is given: boxes share the height and columns the width, so the
+// page never scrolls. A box holding more cards than fit scrolls inside itself, and the arrows
+// between boxes are worked out from the same sizes.
+export const CARD = 57, HDR = 32;
+const GAP = 48, GUTTER = 64, MAX_COL = 400, MIN_COL = 160, MIN_BOX = 2 + HDR + CARD;
+
+export interface BoardLayout { width: number; height: number; col: number; gutter: number; gap: number; boxH: number; labelTop: number; arrows: string[] }
 
 interface Box { x: number; y: number; w: number; h: number }
 interface Pt { x: number; y: number }
@@ -12,8 +12,6 @@ interface Pt { x: number; y: number }
 // Arrows run along the line between two box centers. Both ends stay outside every box
 // by MARGIN px; the whole shape (4px shaft and heads) is checked, not just the line.
 const MARGIN = 8, SHAFT = 2, HEAD_LEN = 12, HEAD_HALF = 7;
-const box = (c: number, r: number): Box => ({ x: c * (COL + GUTTER), y: r * (BOX_H + GAP), w: COL, h: BOX_H });
-const boxes = [0, 1, 2].flatMap((c) => [box(c, 0), box(c, 1)]);
 const center = (b: Box): Pt => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
 const inside = (p: Pt, b: Box) =>
   p.x > b.x - MARGIN && p.x < b.x + b.w + MARGIN && p.y > b.y - MARGIN && p.y < b.y + b.h + MARGIN;
@@ -29,7 +27,7 @@ function shape(s: Pt, t: Pt, both: boolean): Pt[] {
   return [...tail, at(t, -HEAD_LEN, SHAFT), at(t, -HEAD_LEN, HEAD_HALF), t, at(t, -HEAD_LEN, -HEAD_HALF), at(t, -HEAD_LEN, -SHAFT)];
 }
 
-function arrowPath(from: Box, to: Box, both = false): string {
+function arrowPath(boxes: Box[], from: Box, to: Box, both = false): string {
   const p = center(from), q = center(to), d = { x: q.x - p.x, y: q.y - p.y };
   let ts = exit(from, d), te = 1 - exit(to, d);
   const pt = (k: number) => ({ x: p.x + d.x * k, y: p.y + d.y * k });
@@ -46,8 +44,23 @@ function arrowPath(from: Box, to: Box, both = false): string {
   throw new Error('arrow does not fit between boxes');
 }
 
-const [bDevelop, bFix, bCi, bReview, bDone] = boxes;
-export const ARROWS = [
-  arrowPath(bDevelop, bCi), arrowPath(bCi, bReview), arrowPath(bReview, bFix),
-  arrowPath(bFix, bCi, true), arrowPath(bReview, bDone),
-];
+// width and height are the space available; past the minimum sizes the board overflows it.
+export function boardLayout(width: number, height: number): BoardLayout {
+  const col = Math.max(MIN_COL, Math.min(MAX_COL, Math.floor((width - 2 * GUTTER) / 3)));
+  const boxH = Math.max(MIN_BOX, Math.floor((height - GAP) / 2));
+  const boxes = [0, 1, 2].flatMap((c) => [0, 1].map((r) => ({ x: c * (col + GUTTER), y: r * (boxH + GAP), w: col, h: boxH })));
+  const [develop, fix, ci, review, done] = boxes;
+  return {
+    width: 3 * col + 2 * GUTTER,
+    height: 2 * boxH + GAP,
+    col,
+    gutter: GUTTER,
+    gap: GAP,
+    boxH,
+    labelTop: 1 + HDR + CARD / 2,
+    arrows: [
+      arrowPath(boxes, develop, ci), arrowPath(boxes, ci, review), arrowPath(boxes, review, fix),
+      arrowPath(boxes, fix, ci, true), arrowPath(boxes, review, done),
+    ],
+  };
+}

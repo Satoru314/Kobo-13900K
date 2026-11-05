@@ -1,3 +1,4 @@
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 body{margin:0;background:#f5f5f3}
 a{color:#1f63b8}a:hover{color:#164a8a}
 .row{transition:background-color .12s}

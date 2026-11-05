@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { api, type Candidate, type Mode, type Project, type Status, type TaskDetail, type TaskEvent, type TaskSummary } from './api';
-import { ARROWS, BOARD_H, BOARD_W, BOX_H, CARD, COL, GAP, GUTTER, HDR, LABEL_TOP, SLOTS } from './board';
+import { boardLayout, CARD, HDR, type BoardLayout } from './board';
 
 const MODE_NAMES: Record<Mode, string> = { priority: '優先', immediate: '通常', off_peak: '夜間' };
 const MODE_RANK: Record<Mode, number> = { priority: 0, immediate: 1, off_peak: 2 };
@@ -75,17 +75,27 @@ export function App() {
     return () => source.close();
   }, [reload]);
 
+  // The board is sized from what the header and the composer leave of the window.
+  const [space, setSpace] = useState<{ width: number; height: number } | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => setSpace({ width: entry.contentRect.width, height: entry.contentRect.height }));
+    observer.observe(mainRef.current!);
+    return () => observer.disconnect();
+  }, []);
+  const layout = useMemo(() => (space ? boardLayout(space.width, space.height) : null), [space]);
+
   return (
-    <div style={{ minHeight: '100vh', boxSizing: 'border-box', fontFamily: "'Noto Sans JP', 'Hiragino Sans', system-ui, sans-serif", color: '#24231f', background: '#f5f5f3', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ padding: '18px max(16px, 2.5vw) 14px', borderBottom: '1px solid #e3e2df', background: '#f5f5f3', display: 'flex', alignItems: 'center', gap: 16 }}>
+    <div style={{ height: '100dvh', overflow: 'hidden', boxSizing: 'border-box', fontFamily: "'Noto Sans JP', 'Hiragino Sans', system-ui, sans-serif", color: '#24231f', background: '#f5f5f3', display: 'flex', flexDirection: 'column' }}>
+      <header style={{ padding: '18px max(16px, 2.5vw) 14px', flexShrink: 0, borderBottom: '1px solid #e3e2df', background: '#f5f5f3', display: 'flex', alignItems: 'center', gap: 16 }}>
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: '#1f1e1b' }}>Kobo</span>
           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#55534e', marginTop: 3 }}>13900K</span>
         </div>
         {error && <span style={{ fontSize: 13, fontWeight: 600, color: '#cf222e' }}>{error}</span>}
       </header>
-      <main style={{ flexGrow: 1, overflowX: 'auto', padding: '20px max(16px, 2.5vw) 200px calc(max(16px, 2.5vw) + 20px)' }}>
-        <Board tasks={tasks} open={setSelected} />
+      <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: 'clip', isolation: 'isolate', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
+        {layout && <Board layout={layout} tasks={tasks} open={setSelected} />}
       </main>
       <Composer />
       {selected !== null && <Detail id={selected} version={detailVersion} close={() => setSelected(null)} />}
@@ -93,36 +103,32 @@ export function App() {
   );
 }
 
-function Board({ tasks, open }: { tasks: TaskSummary[]; open: (id: number) => void }) {
+function Board({ layout, tasks, open }: { layout: BoardLayout; tasks: TaskSummary[]; open: (id: number) => void }) {
   return (
-    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', width: BOARD_W }}>
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', width: layout.width }}>
       {LAYOUT.map((cols, i) => (
         <div key={i} style={{ display: 'contents' }}>
-          {i > 0 && <div style={{ flex: `0 0 ${GUTTER}px` }} />}
-          <div style={{ flex: `0 0 ${COL}px`, display: 'flex', flexDirection: 'column' }}>
-            {cols.map((col) => (
-              <div key={col.name}>
-                <Column name={col.name} tasks={col.statuses.flatMap((s) => order(tasks, s))} open={open} />
-                <div style={{ height: GAP }} />
-              </div>
-            ))}
+          {i > 0 && <div style={{ flex: `0 0 ${layout.gutter}px` }} />}
+          <div style={{ flex: `0 0 ${layout.col}px`, minWidth: 0, display: 'flex', flexDirection: 'column', gap: layout.gap }}>
+            {cols.map((col) => <Column key={col.name} name={col.name} layout={layout} tasks={col.statuses.flatMap((s) => order(tasks, s))} open={open} />)}
           </div>
         </div>
       ))}
-      <svg aria-hidden="true" width={BOARD_W} height={BOARD_H} viewBox={`0 0 ${BOARD_W} ${BOARD_H}`} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }} fill="#cfcdc8">
-        {ARROWS.map((d) => <path key={d} d={d} />)}
+      <svg aria-hidden="true" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }} fill="#cfcdc8">
+        {layout.arrows.map((d) => <path key={d} d={d} />)}
       </svg>
     </div>
   );
 }
 
-function Column({ name, tasks, open }: { name: string; tasks: TaskSummary[]; open: (id: number) => void }) {
+function Column({ name, layout, tasks, open }: { name: string; layout: BoardLayout; tasks: TaskSummary[]; open: (id: number) => void }) {
   // the last card draws its bottom edge unless the box is full and its own border closes it
-  const bottom = (i: number) => (i === tasks.length - 1 && tasks.length >= SLOTS ? 'none' : BORDER);
+  const full = 2 + HDR + tasks.length * CARD >= layout.boxH;
+  const bottom = (i: number) => (i === tasks.length - 1 && full ? 'none' : BORDER);
   const visor = tasks.length > 0 ? VISOR[tasks[0].status] : undefined;
   const rest = visor ? tasks.slice(1) : tasks;
   return (
-    <section style={{ position: 'relative', boxSizing: 'border-box', height: BOX_H, border: BORDER, background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+    <section style={{ position: 'relative', boxSizing: 'border-box', height: layout.boxH, border: BORDER, background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: '0 0 auto', boxSizing: 'border-box', height: HDR, display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px', borderBottom: BORDER }}>
         <span style={{ fontSize: 16, fontWeight: 600, color: '#1f1e1b' }}>{name}</span>
         <span style={{ fontSize: 14, fontWeight: 500, color: '#6b6964' }}>{tasks.length}</span>
@@ -130,7 +136,7 @@ function Column({ name, tasks, open }: { name: string; tasks: TaskSummary[]; ope
       {visor && (
         <>
           <Card task={tasks[0]} bottom={bottom(0)} open={open} visor />
-          <span style={{ position: 'absolute', right: 'calc(100% + 6px)', top: LABEL_TOP, transform: 'translateY(-50%)', writingMode: 'vertical-rl', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', lineHeight: 1, color: '#0969da', whiteSpace: 'nowrap' }}>{visor}</span>
+          <span style={{ position: 'absolute', right: 'calc(100% + 6px)', top: layout.labelTop, transform: 'translateY(-50%)', zIndex: 1, background: '#f5f5f3', writingMode: 'vertical-rl', fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', lineHeight: 1, color: '#0969da', whiteSpace: 'nowrap' }}>{visor}</span>
         </>
       )}
       <div className="noscroll" style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -219,15 +225,15 @@ function Composer() {
     .sort((a, b) => a.rank - b.rank || a.dir.localeCompare(b.dir, 'en', { sensitivity: 'base' }));
 
   return (
-    <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, padding: '0 16px 20px', display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-      <div style={{ width: 'min(760px, 100%)', display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'auto' }}>
+    <div style={{ flexShrink: 0, boxSizing: 'border-box', padding: '0 16px 20px', display: 'flex', justifyContent: 'center' }}>
+      <div style={{ position: 'relative', width: 'min(760px, 100%)' }}>
         {candidates && (
-          <div style={{ display: 'flex', flexDirection: 'column', border: BORDER, background: '#ffffff', overflow: 'hidden', boxShadow: '0 4px 16px rgba(15,15,15,0.08)' }}>
+          <div style={{ position: 'absolute', left: 0, right: 0, bottom: 'calc(100% + 8px)', display: 'flex', flexDirection: 'column', border: BORDER, background: '#ffffff', overflow: 'hidden', boxShadow: '0 4px 16px rgba(15,15,15,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderBottom: BORDER }}>
               <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, fontWeight: 600, color: '#3a3935' }}>~/programF/</span>
               <button type="button" className="ghost" onClick={() => setCandidates(null)} style={{ marginLeft: 'auto', height: 24, padding: '0 8px', border: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: '#4a4843', cursor: 'pointer' }}>閉じる</button>
             </div>
-            <ul style={{ margin: 0, padding: 4, listStyle: 'none', maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <ul style={{ margin: 0, padding: 4, listStyle: 'none', maxHeight: 'min(240px, 40dvh)', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {sorted.map((c) => {
                 const disabled = c.registered || !!c.problem;
                 return (
