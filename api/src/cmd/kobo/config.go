@@ -2,12 +2,12 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
 	"time"
 
-	"github.com/Satoru314/Kobo-13900K/api/src/domain"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
@@ -16,7 +16,6 @@ type Config struct {
 	Listen      string
 	ClaudeBin   string
 	LogDir      string
-	OffPeak     domain.OffPeakWindow
 	Settings    usecase.Settings
 }
 
@@ -75,10 +74,24 @@ func LoadConfig() (Config, error) {
 	if v := c.Settings.ShotsRepo; v != "" && !ownerRepo.MatchString(v) && r.err == nil {
 		r.err = fmt.Errorf("KOBO_SHOTS_REPO: %q is not owner/name", v)
 	}
-	window, err := domain.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
+	window, err := usecase.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
 	if err != nil && r.err == nil {
 		r.err = err
 	}
-	c.OffPeak = window
+	c.Settings.OffPeak = window
 	return c, r.err
+}
+
+// AgentURL is where the AI, running on this machine, reaches kobo's agent MCP
+// server. Listening on all interfaces (0.0.0.0, ::, or no host) is reached
+// through loopback: the MCP server rejects a Host header such as 0.0.0.0.
+func (c Config) AgentURL() (string, error) {
+	host, port, err := net.SplitHostPort(c.Listen)
+	if err != nil {
+		return "", fmt.Errorf("KOBO_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/mcp/agent", nil
 }

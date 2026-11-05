@@ -10,13 +10,15 @@ const (
 	PRStateClosed PRState = "closed"
 )
 
+func (s PRState) Valid() bool { return s == PRStateOpen || s == PRStateMerged || s == PRStateClosed }
+
 type PullRequest struct {
-	ID        int64      `json:"id"`
-	TaskID    int64      `json:"task_id"`
-	Number    int        `json:"number"`
-	URL       string     `json:"url"`
-	Branch    string     `json:"branch"`
-	State     PRState    `json:"state"`
-	CreatedAt time.Time  `json:"created_at"`
-	MergedAt  *time.Time `json:"merged_at"`
+	ID        int64
+	TaskID    int64
+	Number    int
+	URL       string
+	Branch    string
+	State     PRState
+	CreatedAt time.Time
+	MergedAt  *time.Time
 }

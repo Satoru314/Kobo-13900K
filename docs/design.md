@@ -429,113 +429,65 @@ erDiagram
 
 ```
 Kobo-13900K/
+├── Makefile                       make migrate（マイグレーションの適用）
 ├── api/
-│   ├── go.mod
-│   ├── go.sum
-│   ├── migrations/
-│   │   └── 0001_init.sql          全テーブルの作成
+│   ├── migrations/                SQL のマイグレーション（テーブル定義の正）。make migrate で適用する
 │   └── src/
-│       ├── cmd/kobo/
-│       │   ├── main.go            組み立て、HTTP サーバーと worker の起動、停止
-│       │   └── config.go          設定の読み込み（DB、ポート、~/programF の場所、off_peak の時間帯、レビューの上限回数、スクリーンショットのリポジトリ）
+│       ├── cmd/
+│       │   ├── kobo/              main.go 組み立てと起動・停止、config.go 設定の読み込み
+│       │   └── migrate/           make migrate の中身
 │       │
-│       ├── controller/
-│       │   ├── iusecase/          controller が使う usecase のインターフェース
-│       │   │   ├── task.go
-│       │   │   ├── project.go
-│       │   │   ├── queue.go
-│       │   │   ├── completion.go
-│       │   │   ├── ci.go
-│       │   │   └── pr.go
-│       │   ├── rest/
-│       │   │   ├── router.go      URL とハンドラの対応表
-│       │   │   ├── task.go        /tasks 系（一覧・詳細・events・発行・編集・cancel・retry）
-│       │   │   ├── project.go     /projects
-│       │   │   ├── queue.go       /queue
-│       │   │   ├── events.go      /events（SSE）
-│       │   │   └── health.go      /health
-│       │   ├── web/
-│       │   │   ├── web.go         埋め込んだ GUI を / で配信
-│       │   │   └── dist/          app/ のビルド結果（.gitkeep 以外はコミットしない）
-│       │   ├── mcp/
-│       │   │   ├── server.go      ツール名とハンドラの対応表
-│       │   │   ├── task.go        ユーザー向けのタスク系ツール
-│       │   │   ├── project.go     list_projects
-│       │   │   ├── queue.go       get_queue
-│       │   │   └── completion.go  AI 向け（complete_development / complete_review / report_blocked）
-│       │   └── worker/
-│       │       ├── queue.go       キューの取り出し（合図＋定期確認）
-│       │       ├── ci.go          CI のポーリング
-│       │       └── pr.go          PR のポーリング
+│       ├── domain/                テーブルごとの型、列の値の定数とその Valid()、ErrNotFound。規則は置かない
 │       │
-│       ├── usecase/
-│       │   ├── irepository/       usecase が使う repository のインターフェース
-│       │   │   ├── task.go
-│       │   │   ├── project.go
-│       │   │   ├── session.go
-│       │   │   ├── pull_request.go
-│       │   │   ├── review_round.go
-│       │   │   ├── event.go
-│       │   │   ├── tx.go
-│       │   │   ├── runner.go      AI の起動・resume
-│       │   │   ├── github.go
-│       │   │   └── git.go
-│       │   ├── task.go            発行・一覧・詳細・編集・cancel・retry・実行フローの取得
-│       │   ├── project.go         一覧、ディレクトリ名からの登録
-│       │   ├── queue.go           次のタスクを取り出して実行する
-│       │   ├── completion.go      AI の完了通知・進められない報告の反映
-│       │   ├── ci.go              CI 結果の反映（成功 → review、失敗 → fix、周回の判定）
-│       │   ├── pr.go              マージ・クローズの反映
-│       │   └── signal.go          キューの合図、実行中の AI、変更通知の配信
+│       ├── usecase/               kobo がやること全部。Usecase 1つで、ファイルは主題ごと
+│       │   ├── usecase.go         Usecase、Settings、エラー
+│       │   ├── ports.go           usecase が使う外側のインターフェース（DB、RepoHost、AI、Notifier）
+│       │   ├── dto.go             domain の型にない形の入出力（TaskSummary、TaskDetail など）
+│       │   ├── rules.go           共通の規則（ステータスの遷移、開始・待ちへの戻し、編集の可否、次のステータス、夜間の時間帯）
+│       │   ├── record.go          event の記録、ステータスの移動、レビューの周回の記録
+│       │   ├── task.go            発行・一覧・詳細・実行フロー・編集・取り消し・再実行
+│       │   ├── project.go         一覧・候補・登録
+│       │   ├── queue.go           キューの順番・一時停止・再開・RunNext（取り出し→実行→後始末）・起動時の回収
+│       │   ├── report.go          AI の報告（完了・レビュー結果・進められない）
+│       │   ├── watch.go           CI と PR の確認
+│       │   ├── activerun.go       実行中の AI を止めるためのスイッチ
+│       │   ├── history.go         event から求めるもの（直前のステータス、連続失敗数など）
+│       │   └── prompt.go          AI への指示文
 │       │
-│       ├── domain/
-│       │   ├── task.go            Task、Status、Mode、status の遷移ルール
-│       │   ├── queue.go           キューの並び順
-│       │   ├── project.go
-│       │   ├── session.go
-│       │   ├── pull_request.go
-│       │   ├── review_round.go
-│       │   └── event.go
+│       ├── repository/            外の世界とのやりとり
+│       │   ├── model/             GORM で読み書きする行の型（Model）
+│       │   ├── db*.go             DB（Postgres、GORM）。次に実行するタスクの並び順は db_task.go の SQL
+│       │   ├── migrate.go         マイグレーションの適用と未適用の確認
+│       │   ├── repohost.go        RepoHost（git と gh）
+│       │   ├── runner_claude.go   AI（Claude Code）。AI を足すときは runner_<名前>.go
+│       │   ├── playwright.go      AI に渡すブラウザ（Playwright MCP）
+│       │   └── command.go         外部コマンドの実行
 │       │
-│       └── repository/            外部とのやりとり全部（1パッケージ）
-│           ├── postgres.go        DB 接続
-│           ├── tx.go              トランザクション・行ロック
-│           ├── task.go
-│           ├── project.go
-│           ├── session.go
-│           ├── pull_request.go
-│           ├── review_round.go
-│           ├── event.go
-│           ├── runner_claude.go   Claude 用の runner（AI を足すときは runner_<名前>.go）
-│           ├── playwright.go      AI に渡すブラウザ（Playwright MCP）の準備
-│           ├── github.go
-│           └── git.go
+│       ├── notify/                変更の通知（GUI の /events へ）と、キューの worker を起こす合図
+│       │
+│       └── controller/
+│           ├── schema/            REST と MCP が送受信する形（Schema）と、usecase の結果からの詰め替え
+│           ├── rest/              Echo のルートとハンドラ
+│           ├── mcp/               MCP サーバー（ユーザー用 /mcp、AI 用 /mcp/agent）
+│           ├── worker/            キューの worker と、CI・PR のポーリング
+│           └── web/               埋め込んだ GUI を / で配信（dist/ は app/ のビルド結果）
 │
-├── app/                           フロント（Vite + React + TypeScript）。ビルド結果は api/src/controller/web/dist に出し、kobo のバイナリに埋め込んで `/` で配信する
-├── deploy/
-│   └── kobo.service               systemd のユニット
-├── docs/
-│   └── design.md
+├── app/                           フロント（Vite + React + TypeScript）
+├── docs/design.md
 ├── compose.yaml                   Postgres
-├── .env.example
-├── .gitignore
-└── README.md
+└── .env.example
 ```
 
 ### 層のルール
 
-- クリーンアーキテクチャ。依存は controller → usecase → domain、usecase → repository（インターフェース）の向きだけ
-- インターフェースを付けるのは usecase と repository だけ。repository を偽物に替えれば、usecase のテストで DB・AI・GitHub が要らない
-- インターフェースは使う側の層に置く。usecase が使うものは `usecase/irepository/`、controller が使うものは `controller/iusecase/`。型名に `I` は付けない
+- 依存の向きは controller → usecase → domain、repository → usecase（usecase の定めるインターフェースを実装する）、どこからも domain
+- **domain** はテーブルと同じ形の型と、列の値の定数、その `Valid()` だけ。規則は usecase に置く
+- **usecase** は1つの `Usecase`。使う外側（DB、RepoHost、AI、Notifier）は `ports.go` のインターフェースで受ける。入出力は domain の型をそのまま使い、domain にない形のときだけ DTO（`dto.go`）を作る。DTO は domain にだけ依存する
+- **repository** の DB は GORM で、行の型（Model、`repository/model`）と domain を詰め替える。`AutoMigrate` は使わず、テーブル定義はマイグレーションの SQL を正とする
+- **controller** は usecase の結果を Schema（`controller/schema`）に詰め替えて返す。使う usecase のメソッドは、controller ごとに自分の側でインターフェースとして定義する
+- 型の名前: フロントに送る型は Schema、usecase の入出力は DTO、repository の行は Model
 - DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
-- 層ごとに別のデータ型は作らない。domain の型を共有する
-- 厳密に分ける。読むだけの処理も usecase を通す
-- 関数はすべて型のメソッドとして定義する。普通の関数はコンストラクタ（`New<型名>`）だけ
-- `main` の仕事
-  1. repository → usecase → controller の順にコンストラクタを呼んで組み立てる
-  2. `/mcp` を MCP のハンドラ、それ以外を REST のルーターに割り当て、1つの HTTP サーバーで起動する（rest と mcp は互いを知らない）
-  3. worker を goroutine で起動する
-  4. 終了の合図が来たら、全部をそろって止める
+- 起動時にマイグレーションを適用しない。未適用のものがあれば起動しない（`make migrate` で適用する）
 
 ### worker
 
