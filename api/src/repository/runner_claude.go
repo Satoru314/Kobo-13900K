@@ -40,9 +40,12 @@ func (r *ClaudeRunner) NewSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// mcpConfig names kobo's server kobo-agent, not kobo: Claude Code shares state
+// such as "needs auth" between servers of the same name, and the user's own kobo
+// server is often configured as kobo.
 func (r *ClaudeRunner) mcpConfig(browserOutputDir string) (string, error) {
 	servers := map[string]any{
-		"kobo": map[string]any{"type": "http", "url": r.agentURL},
+		"kobo-agent": map[string]any{"type": "http", "url": r.agentURL},
 	}
 	if r.browser.installed {
 		servers["playwright"] = r.browser.server(browserOutputDir)

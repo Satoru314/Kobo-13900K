@@ -54,7 +54,11 @@ func run() error {
 	events := repository.NewEventRepository(pg)
 	git := repository.NewGit()
 	github := repository.NewGitHub()
-	runner := repository.NewClaudeRunner(cfg.ClaudeBin, "http://"+cfg.Listen+"/mcp/agent", cfg.LogDir)
+	agentURL, err := cfg.AgentURL()
+	if err != nil {
+		return err
+	}
+	runner := repository.NewClaudeRunner(cfg.ClaudeBin, agentURL, cfg.LogDir)
 
 	// usecase
 	sig := usecase.NewQueueSignal()

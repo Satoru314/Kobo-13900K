@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -74,4 +75,18 @@ func LoadConfig() (Config, error) {
 	}
 	c.OffPeak = window
 	return c, r.err
+}
+
+// AgentURL is where the AI, running on this machine, reaches kobo's agent MCP
+// server. Listening on all interfaces (0.0.0.0, ::, or no host) is reached
+// through loopback: the MCP server rejects a Host header such as 0.0.0.0.
+func (c Config) AgentURL() (string, error) {
+	host, port, err := net.SplitHostPort(c.Listen)
+	if err != nil {
+		return "", fmt.Errorf("KOBO_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/mcp/agent", nil
 }
