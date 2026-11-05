@@ -59,12 +59,13 @@ const queueOrder = `CASE WHEN status = 'fix' THEN 0
 var waitingStatuses = []string{string(domain.StatusDevelop), string(domain.StatusReview), string(domain.StatusFix)}
 
 // NextRunnableTask locks and returns the waiting task the queue takes next: one
-// whose enqueued_at has come, and, for a new off_peak task, only inside the window.
-func (d *DB) NextRunnableTask(ctx context.Context, now time.Time, inOffPeak bool) (domain.Task, bool, error) {
+// whose enqueued_at has come, and, for a new off_peak task, only while the
+// development AI's off-peak schedule is open.
+func (d *DB) NextRunnableTask(ctx context.Context, now time.Time, offPeakOpen bool) (domain.Task, bool, error) {
 	var rows []model.Task
 	err := d.conn(ctx).
 		Where("status IN ? AND enqueued_at <= ?", waitingStatuses, now).
-		Where("status <> 'develop' OR mode <> 'off_peak' OR ?", inOffPeak).
+		Where("status <> 'develop' OR mode <> 'off_peak' OR ?", offPeakOpen).
 		Order(queueOrder).Limit(1).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Find(&rows).Error

@@ -55,6 +55,20 @@ func (u *Usecase) ValidateAISetting(ctx context.Context) error {
 	return nil
 }
 
+// offPeakOpen reports whether the development AI in the setting is in its
+// off-peak schedule at now. Only new off_peak tasks are gated on it.
+func (u *Usecase) offPeakOpen(ctx context.Context, now time.Time) (bool, error) {
+	setting, err := u.db.GetAISetting(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read AI setting: %w", err)
+	}
+	model, ok := u.catalog.Get(setting.DevAI)
+	if !ok {
+		return false, fmt.Errorf("%w: AI model %q is not in the catalog", ErrAIUnavailable, setting.DevAI)
+	}
+	return model.OffPeak.Active(now), nil
+}
+
 // sessionAI picks the runner and model for a new session of role. Review uses
 // its own model only when the setting separates review.
 func (u *Usecase) sessionAI(ctx context.Context, role domain.Role) (AIModel, AI, error) {

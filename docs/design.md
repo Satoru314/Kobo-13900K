@@ -97,7 +97,7 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 - **実行モード**（`task.mode`）。GUI では 優先 / 通常 / 夜間 と表示する
   - `priority`：ほかの新規より先に実行する
   - `immediate`：順番が来しだい実行する
-  - `off_peak`：安い時間帯になるまで待つ。安い時間帯は設定で時刻の範囲として決める（例: DeepSeek のオフピーク割引の時間帯）
+  - `off_peak`：開発 AI の安い時間帯になるまで待つ。時間帯は `ai.json` のモデルごとの `off_peak` に書く（例: DeepSeek のオフピーク割引の時間帯）
 - `enqueued_at` は、上の status になってキューに入った時刻。キューの外にいる間は空
 - 割り込みはしない。実行中の task が終わってから次を取り出す
 - 取り出す条件には「`enqueued_at` が今より前」も含める
@@ -108,7 +108,7 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 
 | タイマー | 持つ場所 |
 |---|---|
-| off_peak の時間帯 | 設定 |
+| off_peak の時間帯 | `ai.json`（モデルごと） |
 | CI・PR のポーリング間隔 | worker の定期実行 |
 | AI の実行時間の上限 | AI を起動した worker がその場で計る |
 | 自動再実行までの待ち | `task.enqueued_at` |
@@ -151,14 +151,31 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
     "opencode": { "runner": "opencode", "bin": "opencode", "agent": "build" }
   },
   "models": [
-    { "id": "claude", "label": "Claude", "provider": "claude" },
+    { "id": "claude", "label": "Claude", "provider": "claude",
+      "off_peak": {
+        "mon": ["19:00-10:00"], "tue": ["19:00-10:00"], "wed": ["19:00-10:00"],
+        "thu": ["19:00-10:00"], "fri": ["19:00-10:00"], "sat": ["19:00-10:00"],
+        "sun": ["19:00-10:00"] } },
     { "id": "deepseek-v4.1-flash", "label": "DeepSeek V4.1 Flash",
-      "provider": "opencode", "model": "opencode-go/deepseek-v4.1-flash" }
+      "provider": "opencode", "model": "opencode-go/deepseek-v4.1-flash",
+      "off_peak": {
+        "mon": ["13:00-15:00", "19:00-10:00"],
+        "tue": ["13:00-15:00", "19:00-10:00"],
+        "wed": ["13:00-15:00", "19:00-10:00"],
+        "thu": ["13:00-15:00", "19:00-10:00"],
+        "fri": ["13:00-15:00", "19:00-10:00"],
+        "sat": ["00:00-24:00"],
+        "sun": ["00:00-24:00", "19:00-10:00"] } }
   ]
 }
 ```
 
 - `id` は DB に保存するので変えない。表示名は `label`、opencode に渡すモデルは `model`。
+- `off_peak` は全モデルで必須。曜日 `mon`〜`sun` ごとに時間帯を並べる。1日に複数書ける。
+  - 時間帯は `"HH:MM-HH:MM"` で、kobo のローカル時刻。終了が開始より早いもの（例: `"19:00-10:00"`）は、開始した曜日に属し、翌日の終了時刻まで続く。
+  - `"00:00-24:00"` は終日。重なった時間帯は和集合として扱う。
+  - 7曜日すべて必要。時間帯がない日は `[]`。祝日は判定せず平日として扱う。
+  - off_peak タスクを始めてよいかの判定には、設定の開発 AI の時間帯を使う。レビューと fix は時間帯に関係なく始める。
 - カタログは起動時に読む。`ai.json` を変えたら kobo を再起動する。
 - `model` が空ならその CLI のデフォルト（Claude はこれ）。
 - 設定画面では「コーディング用AI」を選び、「レビュー用AIを分ける」をオンにしたときだけ「レビュー用AI」を選ぶ。オフのときはレビューもコーディングと同じ AI を使う。
@@ -191,7 +208,7 @@ GUI からは REST、AI（Claude Code / opencode）からは同じ機能を MCP 
 | POST | `/tasks/{id}/cancel` | `cancel_task` | 取り消し。`develop` の間だけ。`cancelled` にする |
 | POST | `/tasks/{id}/retry` | `retry_task` | `error` のタスクを、エラー前の status に戻してキューに入れる |
 | GET | `/queue` | `get_queue` | 次に実行される順のタスク一覧 |
-| GET | `/ai` | - | AI モデルのカタログと、いまの開発・レビューの選択 |
+| GET | `/ai` | - | AI モデルのカタログ（各モデルの `off_peak` を含む）と、いまの開発・レビューの選択 |
 | PUT | `/ai/setting` | - | 開発・レビューの AI を変更する。`separate_review` で分離する |
 
 ### AI 向け
@@ -454,7 +471,6 @@ erDiagram
 | `KOBO_LOG_DIR` | `~/.kobo/logs` | ログの置き場所 |
 | `KOBO_PROJECTS_DIR` | `~/programF` | 対象リポジトリを置くディレクトリ |
 | `KOBO_WORKTREES_DIR` | `~/.kobo/worktrees` | worktree を作るディレクトリ |
-| `KOBO_OFF_PEAK` | `01:00-07:00` | off_peak の時間帯 |
 | `KOBO_MAX_REVIEW_ROUNDS` | `2` | レビューの上限回数 |
 | `KOBO_DEV_TIMEOUT` | `60m` | 開発と fix の実行時間の上限 |
 | `KOBO_REVIEW_TIMEOUT` | `30m` | レビューの実行時間の上限 |

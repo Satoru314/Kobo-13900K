@@ -57,11 +57,14 @@ export interface Session {
   created_at: string;
 }
 
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
 export interface AIModel {
   id: string;
   label: string;
   provider: string;
   model: string;
+  off_peak: Record<Weekday, string[]>;
 }
 
 export interface AISetting {
