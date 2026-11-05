@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,74 +76,135 @@ func TestCheckVersion(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		command string
+		role    string
 		output  string
 		wantErr []string
 	}{
-		{name: "gh", command: "gh", output: "gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)"},
-		{name: "git", command: "git", output: "git version 2.17.0"},
-		{name: "claude", command: "claude", output: "1.0.53 (Claude Code)"},
-		{name: "opencode", command: "opencode", output: "opencode v2.0.19"},
-		{name: "playwright-mcp", command: "playwright-mcp", output: "Version 0.0.25"},
+		{name: "gh", command: "gh", role: "gh", output: "gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)"},
+		{name: "git", command: "git", role: "git", output: "git version 2.17.0"},
+		{name: "claude", command: "claude", role: "claude", output: "1.0.53 (Claude Code)"},
+		{name: "opencode", command: "opencode", role: "opencode", output: "opencode v2.0.19"},
+		{name: "playwright-mcp", command: "playwright-mcp", role: "playwright-mcp", output: "Version 0.0.25"},
 		{
 			name:    "old gh",
 			command: "gh",
+			role:    "gh",
 			output:  "gh version 1.14.0 (2021-07-20)",
 			wantErr: []string{"gh", "1.14.0", "2.0.0"},
 		},
 		{
 			name:    "old git",
 			command: "git",
+			role:    "git",
 			output:  "git version 2.16.0",
 			wantErr: []string{"git", "2.16.0", "2.17.0"},
 		},
 		{
 			name:    "old claude",
 			command: "claude",
+			role:    "claude",
 			output:  "1.0.52 (Claude Code)",
 			wantErr: []string{"claude", "1.0.52", "1.0.53"},
 		},
 		{
 			name:    "old opencode",
 			command: "opencode",
+			role:    "opencode",
 			output:  "opencode v2.0.18",
 			wantErr: []string{"opencode", "2.0.18", "2.0.19"},
 		},
 		{
 			name:    "opencode path",
 			command: "/usr/local/bin/opencode",
+			role:    "opencode",
 			output:  "opencode v2.0.18",
 			wantErr: []string{"/usr/local/bin/opencode", "2.0.18", "2.0.19"},
 		},
 		{
 			name:    "old playwright-mcp",
 			command: "playwright-mcp",
+			role:    "playwright-mcp",
 			output:  "Version 0.0.24",
 			wantErr: []string{"playwright-mcp", "0.0.24", "0.0.25"},
 		},
 		{
+			name:    "renamed old playwright-mcp",
+			command: "mcp-server-playwright",
+			role:    "playwright-mcp",
+			output:  "Version 0.0.10",
+			wantErr: []string{"mcp-server-playwright", "0.0.10", "0.0.25"},
+		},
+		{
+			name:    "renamed old opencode",
+			command: "opencode-old",
+			role:    "opencode",
+			output:  "opencode v0.1.0",
+			wantErr: []string{"opencode-old", "0.1.0", "2.0.19"},
+		},
+		{
+			name:    "renamed old claude",
+			command: "claude-code",
+			role:    "claude",
+			output:  "0.2.0 (Claude Code)",
+			wantErr: []string{"claude-code", "0.2.0", "1.0.53"},
+		},
+		{
+			name:    "renamed new playwright-mcp",
+			command: "mcp-server-playwright",
+			role:    "playwright-mcp",
+			output:  "Version 0.0.84",
+		},
+		{
+			name:    "unknown role",
+			command: "opencode-old",
+			role:    "unknown",
+			output:  "opencode v0.1.0",
+			wantErr: []string{"opencode-old", "no minimum version", "unknown"},
+		},
+		{
 			name:    "unreadable",
 			command: "opencode",
+			role:    "opencode",
 			output:  "opencode version unknown",
 			wantErr: []string{"opencode", "cannot read a version"},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			err := checkVersion(c.command, c.output)
+			err := checkVersion(c.command, c.role, c.output)
 			if len(c.wantErr) == 0 {
 				if err != nil {
-					t.Fatalf("checkVersion(%q, %q): %v", c.command, c.output, err)
+					t.Fatalf("checkVersion(%q, %q, %q): %v", c.command, c.role, c.output, err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("checkVersion(%q, %q) = nil error, want %v", c.command, c.output, c.wantErr)
+				t.Fatalf("checkVersion(%q, %q, %q) = nil error, want %v", c.command, c.role, c.output, c.wantErr)
 			}
 			for _, want := range c.wantErr {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("checkVersion(%q, %q) = %q, want it to contain %q", c.command, c.output, err, want)
+					t.Errorf("checkVersion(%q, %q, %q) = %q, want it to contain %q", c.command, c.role, c.output, err, want)
 				}
 			}
 		})
+	}
+}
+
+func TestVersionChecksRenamedBinary(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "opencode-old")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho 'opencode v0.1.0'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := version(context.Background(), "opencode-old", "opencode")
+	if err == nil {
+		t.Fatal("version() = nil error, want an error for an old renamed binary")
+	}
+	for _, want := range []string{"opencode-old", "0.1.0", "2.0.19"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("version() = %q, want it to contain %q", err, want)
+		}
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,8 +16,10 @@ import (
 
 const versionTimeout = 15 * time.Second
 
-// minimumVersions is the oldest version of each command kobo runs. The command
-// names are the binary names; a configured path is compared by its base name.
+// minimumVersions is the oldest version of each role kobo relies on. The keys
+// are roles, not binary names: an AI provider can point at a renamed CLI and
+// KOBO_PLAYWRIGHT_MCP_BIN can be any executable. Preflight looks the minimum up
+// by role, so a renamed old binary is still rejected.
 var minimumVersions = map[string]string{
 	"gh":             "2.0.0",  // pr view --json statusCheckRollup
 	"git":            "2.17.0", // worktree remove
@@ -51,19 +52,20 @@ func Preflight(ctx context.Context, cfg Config, catalog *repository.AICatalog) e
 
 	seen := map[string]bool{}
 	for _, p := range catalog.Providers() {
-		if seen[p.Bin] {
+		key := p.Bin + "\x00" + p.Runner
+		if seen[key] {
 			continue
 		}
-		seen[p.Bin] = true
-		add(version(ctx, p.Bin))
+		seen[key] = true
+		add(version(ctx, p.Bin, p.Runner))
 	}
-	add(version(ctx, "git"))
-	add(version(ctx, "gh"))
+	add(version(ctx, "git", "git"))
+	add(version(ctx, "gh", "gh"))
 	if _, err := exec.LookPath("gh"); err == nil {
 		add(runCommand(ctx, "gh", "auth", "status"))
 	}
 	if cfg.Browser {
-		add(version(ctx, cfg.PlaywrightMCP))
+		add(version(ctx, cfg.PlaywrightMCP, "playwright-mcp"))
 	}
 
 	if len(problems) > 0 {
@@ -73,8 +75,8 @@ func Preflight(ctx context.Context, cfg Config, catalog *repository.AICatalog) e
 }
 
 // version runs name --version and compares the reported version with the
-// minimum for that command.
-func version(ctx context.Context, name string) error {
+// minimum for role.
+func version(ctx context.Context, name, role string) error {
 	if err := executable(name); err != nil {
 		return err
 	}
@@ -82,20 +84,20 @@ func version(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	return checkVersion(name, out)
+	return checkVersion(name, role, out)
 }
 
 // checkVersion reads the first version from --version output and compares it
-// with the minimum for name. A command missing from the table still has to
-// print a readable version, but has no minimum.
-func checkVersion(name, output string) error {
+// with the minimum for role. name is only used in errors, so a binary with a
+// different file name is still checked against its role's minimum.
+func checkVersion(name, role, output string) error {
+	required, ok := minimumVersions[role]
+	if !ok {
+		return fmt.Errorf("%s: no minimum version is configured for role %q", name, role)
+	}
 	found, err := parseVersion(output)
 	if err != nil {
 		return fmt.Errorf("%s --version: %w", name, err)
-	}
-	required, ok := minimumVersions[filepath.Base(name)]
-	if !ok {
-		return nil
 	}
 	cmp, err := compareVersions(found, required)
 	if err != nil {
