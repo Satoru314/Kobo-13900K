@@ -23,6 +23,7 @@ type QueueUsecase struct {
 	prs      irepository.PullRequestRepository
 	rounds   irepository.ReviewRoundRepository
 	events   irepository.EventRepository
+	state    irepository.QueueStateRepository
 	projects *ProjectUsecase
 	runner   irepository.Runner
 	git      irepository.Git
@@ -37,9 +38,9 @@ type QueueUsecase struct {
 
 func NewQueueUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, sessions irepository.SessionRepository,
 	prs irepository.PullRequestRepository, rounds irepository.ReviewRoundRepository, events irepository.EventRepository,
-	projects *ProjectUsecase, runner irepository.Runner, git irepository.Git, queue domain.Queue, settings Settings,
-	active *ActiveRun, signal *QueueSignal, changes *Changes) *QueueUsecase {
-	return &QueueUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events,
+	state irepository.QueueStateRepository, projects *ProjectUsecase, runner irepository.Runner, git irepository.Git,
+	queue domain.Queue, settings Settings, active *ActiveRun, signal *QueueSignal, changes *Changes) *QueueUsecase {
+	return &QueueUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events, state: state,
 		projects: projects, runner: runner, git: git, queue: queue, settings: settings, active: active, signal: signal,
 		changes: changes,
 		track:   newTracker(tasks, events), prompts: prompts{maxRounds: settings.MaxReviewRounds}}
@@ -76,6 +77,10 @@ func (u *QueueUsecase) Take(ctx context.Context, now time.Time) (Run, bool, erro
 	found := false
 	err := u.tx.InTx(ctx, func(ctx context.Context) error {
 		if err := u.tx.LockQueue(ctx); err != nil {
+			return err
+		}
+		paused, err := u.state.Paused(ctx)
+		if err != nil || paused {
 			return err
 		}
 		tasks, err := u.tasks.List(ctx, queueStatuses...)
@@ -204,8 +209,16 @@ func (u *QueueUsecase) Execute(ctx context.Context, run Run) error {
 	defer cancel()
 	u.active.set(run.Task.ID, cancel)
 	defer u.active.clear()
+	// A pause that came after Take but before the run was registered stops it here.
+	paused, err := u.state.Paused(ctx)
+	if err != nil {
+		return err
+	}
+	if paused {
+		cancel()
+	}
 
-	err := u.runner.Run(runCtx, irepository.RunRequest{
+	err = u.runner.Run(runCtx, irepository.RunRequest{
 		Role: run.Role, SessionID: run.Session.ExternalSessionID, Resume: run.Resume,
 		WorkDir: run.WorkDir, Prompt: run.Prompt,
 		LogName: "task-" + strconv.FormatInt(run.Task.ID, 10) + "-" + string(run.Role),
@@ -226,6 +239,13 @@ func (u *QueueUsecase) Settle(ctx context.Context, run Run, runErr error, now ti
 		}
 		if !task.Status.Running() {
 			return nil // the AI reported back
+		}
+		paused, err := u.state.Paused(ctx)
+		if err != nil {
+			return err
+		}
+		if paused {
+			return u.putBack(ctx, &task, "paused by user", now)
 		}
 		msg := "AI exited without reporting back"
 		if runErr != nil {
@@ -256,6 +276,43 @@ func (u *QueueUsecase) fail(ctx context.Context, task *domain.Task, msg string, 
 		return err
 	}
 	return u.tasks.Update(ctx, *task)
+}
+
+// putBack returns a running task to its waiting status without counting a failure.
+func (u *QueueUsecase) putBack(ctx context.Context, task *domain.Task, reason string, now time.Time) error {
+	from := task.Status
+	if err := task.Requeue(now, now); err != nil {
+		return err
+	}
+	if err := u.tasks.Update(ctx, *task); err != nil {
+		return err
+	}
+	return u.track.record(ctx, task.ID, nil, domain.EventStatusChanged,
+		map[string]any{"from": string(from), "to": string(task.Status), "reason": reason}, now)
+}
+
+// Paused reports whether the user paused the AI.
+func (u *QueueUsecase) Paused(ctx context.Context) (bool, error) {
+	return u.state.Paused(ctx)
+}
+
+// Pause stops the AI that is running and keeps the queue from starting another
+// until Resume. The stopped task goes back to waiting without counting a failure.
+func (u *QueueUsecase) Pause(ctx context.Context) error {
+	if err := u.state.SetPaused(ctx, true); err != nil {
+		return err
+	}
+	u.active.stopAny()
+	return nil
+}
+
+// Resume lets the queue start tasks again.
+func (u *QueueUsecase) Resume(ctx context.Context) error {
+	if err := u.state.SetPaused(ctx, false); err != nil {
+		return err
+	}
+	u.signal.Notify()
+	return nil
 }
 
 // Recover puts back tasks left running when kobo stopped. It does not count as a failure.

@@ -28,6 +28,9 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tasks/{id}/cancel", rt.tasks.Cancel)
 	mux.HandleFunc("POST /tasks/{id}/retry", rt.tasks.Retry)
 	mux.HandleFunc("GET /queue", rt.queue.List)
+	mux.HandleFunc("GET /queue/state", rt.queue.State)
+	mux.HandleFunc("POST /queue/pause", rt.queue.Pause)
+	mux.HandleFunc("POST /queue/resume", rt.queue.Resume)
 	mux.HandleFunc("GET /events", rt.events.Stream)
 	mux.HandleFunc("GET /health", rt.health.Get)
 }

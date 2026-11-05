@@ -52,6 +52,7 @@ func run() error {
 	prs := repository.NewPullRequestRepository(pg)
 	rounds := repository.NewReviewRoundRepository(pg)
 	events := repository.NewEventRepository(pg)
+	queueState := repository.NewQueueStateRepository(pg)
 	git := repository.NewGit()
 	github := repository.NewGitHub()
 	agentURL, err := cfg.AgentURL()
@@ -66,7 +67,7 @@ func run() error {
 	active := usecase.NewActiveRun()
 	projects := usecase.NewProjectUsecase(projectRepo, git, cfg.Settings)
 	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
-	queueUC := usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, projects, runner, git,
+	queueUC := usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, queueState, projects, runner, git,
 		domain.Queue{OffPeak: cfg.OffPeak}, cfg.Settings, active, sig, changes)
 	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, git, cfg.Settings, active, sig, changes)
 	ciUC := usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, github, cfg.Settings, sig, changes)

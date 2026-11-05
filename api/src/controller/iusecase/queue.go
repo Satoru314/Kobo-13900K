@@ -14,4 +14,7 @@ type QueueUsecase interface {
 	Execute(ctx context.Context, run usecase.Run) error
 	Settle(ctx context.Context, run usecase.Run, runErr error, now time.Time) error
 	Recover(ctx context.Context, now time.Time) error
+	Paused(ctx context.Context) (bool, error)
+	Pause(ctx context.Context) error
+	Resume(ctx context.Context) error
 }

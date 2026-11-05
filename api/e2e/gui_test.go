@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,4 +118,46 @@ func TestEventsStream(t *testing.T) {
 			t.Fatalf("after run: %s", got)
 		}
 	}
+}
+
+// Pausing stops the running AI without counting a failure and keeps the queue
+// from starting anything until it is resumed.
+func TestPauseAndResume(t *testing.T) {
+	h := newHarness(t)
+	task := h.createTask("long", "")
+	h.runner.script(hang)
+	done := make(chan struct{})
+	go func() { defer close(done); h.runNext() }()
+	deadline := time.Now().Add(5 * time.Second)
+	for h.detail(task.ID).Task.Status != domain.StatusDeveloping {
+		if time.Now().After(deadline) {
+			t.Fatal("run did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	var state map[string]bool
+	if code := h.rest("POST", "/queue/pause", nil, &state); code != 200 || !state["paused"] {
+		t.Fatalf("pause = %d %v", code, state)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pause did not stop the run")
+	}
+	h.wantStatus(task.ID, domain.StatusDevelop)
+	if slices.Contains(h.eventTypes(task.ID), domain.EventSystemError) {
+		t.Fatal("pause counted as a failure")
+	}
+	h.nothingReady()
+	h.rest("GET", "/queue/state", nil, &state)
+	if !state["paused"] {
+		t.Fatalf("state = %v", state)
+	}
+
+	if code := h.rest("POST", "/queue/resume", nil, &state); code != 200 || state["paused"] {
+		t.Fatalf("resume = %d %v", code, state)
+	}
+	h.runner.script(devDone(1))
+	h.runNext()
+	h.wantStatus(task.ID, domain.StatusReview)
 }

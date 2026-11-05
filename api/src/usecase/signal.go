@@ -47,6 +47,15 @@ func (a *ActiveRun) clear() {
 	a.set(0, nil)
 }
 
+// stopAny kills the AI process that is running, if any.
+func (a *ActiveRun) stopAny() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cancel != nil {
+		a.cancel()
+	}
+}
+
 // stop kills the AI process of taskID if it is the one running.
 func (a *ActiveRun) stop(taskID int64) {
 	a.mu.Lock()

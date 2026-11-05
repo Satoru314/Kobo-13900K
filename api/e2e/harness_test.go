@@ -237,7 +237,7 @@ func newHarness(t *testing.T) *harness {
 	active := usecase.NewActiveRun()
 	projects := usecase.NewProjectUsecase(repository.NewProjectRepository(pg), h.git, settings)
 	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
-	h.queue = usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.runner, h.git,
+	h.queue = usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, repository.NewQueueStateRepository(pg), projects, h.runner, h.git,
 		domain.Queue{}, settings, active, sig, changes)
 	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.git, settings, active, sig, changes)
 	h.ci = usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, h.gh, settings, sig, changes)

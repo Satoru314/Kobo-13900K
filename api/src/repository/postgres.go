@@ -120,7 +120,10 @@ func (p *Postgres) applyMigration(ctx context.Context, name string) error {
 
 // TruncateAll empties every table. Only the tests use it.
 func (p *Postgres) TruncateAll(ctx context.Context) error {
-	_, err := p.pool.Exec(ctx, "TRUNCATE event, review_round, session, pull_request, task, project RESTART IDENTITY CASCADE")
+	if _, err := p.pool.Exec(ctx, "TRUNCATE event, review_round, session, pull_request, task, project RESTART IDENTITY CASCADE"); err != nil {
+		return err
+	}
+	_, err := p.pool.Exec(ctx, "UPDATE queue_state SET paused = false")
 	return err
 }
 
