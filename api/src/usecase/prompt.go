@@ -36,7 +36,8 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 # 進め方
 - このディレクトリの中だけで作業する。リポジトリの AGENTS.md / CLAUDE.md があれば従う
 - ブランチ名は %[4]s のまま使う
-- 質問はできない。迷ったら妥当な方を選んで進め、選んだ内容を PR に書く
+- 質問はできない。細かい未定は妥当な方を選んで進め、選んだ内容を PR に書く
+- ただし、どちらを選ぶかで作るものが大きく変わる未定（画面の構成、データの持ち方、外から見える振る舞いなど）が要件にあれば、作業を始めずに report_blocked を呼び、何が決まっていないかと、考えられる選択肢を書く
 - テストやビルドの方法があれば、PR を出す前に通す
 - 画面の動作確認は Playwright のブラウザで行う
 - 終わったら push し、%[3]s 向けの PR を gh で作る
@@ -49,7 +50,7 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 
 # 終わり方
 - PR を作ったら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
-- 進められない場合（仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo-agent の report_blocked ツールを呼び、理由を書く
+- 進められない場合（要件に大きな未定がある、仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo-agent の report_blocked ツールを呼び、理由を書く
 - どちらかを呼んだら、それ以上は何もしない
 `, workDir, fullName(pj), pj.DefaultBranch, branch(t), t.Title, t.Description, p.screenshots(t, pj, "PR の本文"))
 }
