@@ -28,13 +28,12 @@
 - タスクごとの実行モード：優先・通常・安い時間帯まで待つ（夜間）
 - AI によるタスク実行と PR 作成
 - CI（GitHub Actions）とレビューのループ（最大2周）
-- GUI での状態一覧（見るだけ）。完成タスクには PR へのリンクを付ける
+- GUI での状態一覧とタスク発行。PR のあるタスクには PR へのリンクと CI の状態を付ける
 - 実行フローの記録
 
 ### 後回しにするもの
 
 - 実行中のタスクへの割り込み
-- GUI からのタスク発行
 - トークン予算を考えたスケジューリング（安い時間帯の判定を料金体系から自動で決めることも含む）
 - モデルの選択と、Claude 以外の AI
 - 通知、外部からのアクセス
@@ -146,8 +145,10 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 | メソッド | パス | MCP ツール | 内容 |
 |---|---|---|---|
 | GET | `/projects` | `list_projects` | 登録済みプロジェクト（リポジトリ）一覧 |
+| GET | `/projects/candidates` | - | `~/programF` 直下のディレクトリ一覧。登録済みか、登録できない理由（git ではない / origin が GitHub ではない）を付ける |
+| POST | `/projects` | - | ディレクトリ名を指定してプロジェクトを登録する |
 | POST | `/tasks` | `create_task` | タスク発行。ディレクトリ名・タイトル・本文・mode を指定。未登録のリポジトリならここで登録し、owner / name / default_branch は git remote から埋める |
-| GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く |
+| GET | `/tasks` | `list_tasks` | タスク一覧。status で絞り込み、`finished` は既定で除く。各タスクにプロジェクトのディレクトリ名、PR の URL と番号、最新の CI の状態（pending / success / failure）を付ける |
 | GET | `/tasks/{id}` | `get_task` | 詳細。PR リンク、レビュー結果 |
 | GET | `/tasks/{id}/events` | `get_task_events` | 実行フロー（dev と review の event を時系列で） |
 | PATCH | `/tasks/{id}` | `update_task` | タイトル・本文・mode の変更。`develop` と `error` の間だけ |
@@ -177,7 +178,7 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
 
 バックエンドでの変更を、GUI にすぐ反映する。
 
-- `GET /events` は `text/event-stream` で、task が変わるたびに `{"task_id": 15}` を流す。中身は ID だけで、GUI はその task を `GET /tasks/{id}` で取り直す（データの形は REST の1つだけにする）
+- `GET /events` は `text/event-stream` で、task が変わるたびに `{"task_id": 15}` を流す。中身は ID だけで、GUI は一覧を `GET /tasks` で取り直し、その task の詳細を開いていれば詳細も取り直す（データの形は REST のものだけにする）
 - 配るのは usecase の notifier。task を変える usecase（task / queue / completion / ci / pr）が、トランザクションのコミット後に呼ぶ。kobo は1プロセスなので、プロセス内で購読者ごとのチャネルに配るだけでよい
 - GUI は `EventSource` でつなぐ。切れたら自動でつなぎ直し、つなぎ直したときは一覧を丸ごと取り直す（切れている間の通知は追わない）
 - 経過時間などの時間で変わる表示は、サーバーから流さず GUI が数える
@@ -189,7 +190,6 @@ GUI からは REST、AI（Claude Code）からは同じ機能を MCP ツール�
   - 判定：PR の最新コミットの check がすべて終わったら完了
   - 成功なら `review`、失敗なら `fix`（直すのは開発 AI）
   - CI の有無はリポジトリに `.github/workflows` があるかで判定する。ない場合は `ci` を飛ばす
-  - CI の状態を GUI に出すのは後回し
 - PR のマージ・クローズを検知して `finished` にする
 - 各段階で event を記録する
 
@@ -402,6 +402,9 @@ Kobo-13900K/
 │       │   │   ├── queue.go       /queue
 │       │   │   ├── events.go      /events（SSE）
 │       │   │   └── health.go      /health
+│       │   ├── web/
+│       │   │   ├── web.go         埋め込んだ GUI を / で配信
+│       │   │   └── dist/          app/ のビルド結果（.gitkeep 以外はコミットしない）
 │       │   ├── mcp/
 │       │   │   ├── server.go      ツール名とハンドラの対応表
 │       │   │   ├── task.go        ユーザー向けのタスク系ツール
@@ -455,7 +458,7 @@ Kobo-13900K/
 │           ├── github.go
 │           └── git.go
 │
-├── app/                           フロント（後回し）
+├── app/                           フロント（Vite + React + TypeScript）。ビルド結果は api/src/controller/web/dist に出し、kobo のバイナリに埋め込んで `/` で配信する
 ├── deploy/
 │   └── kobo.service               systemd のユニット
 ├── docs/

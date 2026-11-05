@@ -1,3 +1,5 @@
 .env
 /api/kobo
 /api/bin/
+/api/src/controller/web/dist/*
+!/api/src/controller/web/dist/.gitkeep

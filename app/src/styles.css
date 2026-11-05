@@ -1,0 +1,13 @@
+body{margin:0;background:#f5f5f3}
+a{color:#1f63b8}a:hover{color:#164a8a}
+.row{transition:background-color .12s}
+.row:hover{background:#f6f6f4 !important}
+.row:focus-visible{outline:2px solid #1f63b8;outline-offset:-2px}
+.btn:focus-visible,.field:focus-visible{outline:2px solid #1f63b8;outline-offset:2px}
+.btn-primary:hover{background:#1a1916 !important}
+.pr-icon:hover{background:#efefed}
+.pr-icon:focus-visible{outline:2px solid #1f63b8;outline-offset:0}
+.ghost:hover{background:#efefed !important}
+.bare:focus{outline:none}
+.bare::placeholder{color:#8a8780}
+.noscroll{scrollbar-width:none}
