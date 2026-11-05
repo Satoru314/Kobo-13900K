@@ -35,10 +35,10 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 - 確認したこと（実行したテストなど）
 
 # 終わり方
-- PR を作ったら kobo の complete_development ツールを呼ぶ（PR の URL と要約）
-- 進められない場合（仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo の report_blocked ツールを呼び、理由を書く
+- PR を作ったら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
+- 進められない場合（仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo-agent の report_blocked ツールを呼び、理由を書く
 - どちらかを呼んだら、それ以上は何もしない
-`, workDir, pj.FullName(), pj.DefaultBranch, t.Branch(), t.Title, t.Description)
+`, workDir, fullName(pj), pj.DefaultBranch, branch(t), t.Title, t.Description)
 }
 
 func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewRound) string {
@@ -59,8 +59,8 @@ func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewR
 - 画面の動作確認は Playwright のブラウザで行う
 
 # 終わり方
-- push したら kobo の complete_development ツールを呼ぶ（PR の URL と要約）
-- 進められない場合は kobo の report_blocked ツールを呼ぶ
+- push したら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
+- 進められない場合は kobo-agent の report_blocked ツールを呼ぶ
 - どちらかを呼んだら、それ以上は何もしない
 `, pr.URL, kind, workDir, pr.Branch, round.Comments)
 }
@@ -91,8 +91,8 @@ PR: %[1]s（%[2]d 周目 / 最大 %[3]d 周）
 - コードは変更しない。commit も push もしない
 
 # 終わり方
-- 指摘がなければ kobo の complete_review ツールを result=approved で呼ぶ
-- 指摘があれば kobo の complete_review ツールを result=changes_requested で呼び、指摘の一覧を comments に渡す
+- 指摘がなければ kobo-agent の complete_review ツールを result=approved で呼ぶ
+- 指摘があれば kobo-agent の complete_review ツールを result=changes_requested で呼び、指摘の一覧を comments に渡す
 - 呼んだら、それ以上は何もしない
 `, pr.URL, roundNo, p.maxRounds, workDir, t.Title, strings.TrimSpace(t.Description), again)
 }

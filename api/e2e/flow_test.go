@@ -1,14 +1,16 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Satoru314/Kobo-13900K/api/src/controller/schema"
 	"github.com/Satoru314/Kobo-13900K/api/src/domain"
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
+	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
 // Issue → develop → CI → review → done → merged → hidden.
@@ -19,10 +21,10 @@ func TestHappyPath(t *testing.T) {
 	h.wantStatus(task.ID, domain.StatusDevelop)
 
 	var projects struct {
-		Projects []domain.Project `json:"projects"`
+		Projects []schema.Project `json:"projects"`
 	}
 	if err := h.callUser("list_projects", map[string]any{}, &projects); err != nil || len(projects.Projects) != 1 ||
-		projects.Projects[0].FullName() != "me/sandbox" {
+		projects.Projects[0].Owner+"/"+projects.Projects[0].Name != "me/sandbox" {
 		t.Fatalf("project not registered from git remote: %+v %v", projects, err)
 	}
 
@@ -38,7 +40,7 @@ func TestHappyPath(t *testing.T) {
 
 	h.checkCI() // pending
 	h.wantStatus(task.ID, domain.StatusCI)
-	h.gh.ci = []irepository.CIResult{{State: irepository.CISuccess}}
+	h.gh.ci = []usecase.CIResult{{State: usecase.CISuccess}}
 	h.checkCI()
 	h.wantStatus(task.ID, domain.StatusReview)
 
@@ -48,7 +50,7 @@ func TestHappyPath(t *testing.T) {
 		t.Fatalf("review run = %+v", run)
 	}
 	d = h.wantStatus(task.ID, domain.StatusDone)
-	if len(d.Rounds) != 1 || d.Rounds[0].Result != domain.ReviewApproved {
+	if len(d.Rounds) != 1 || d.Rounds[0].Result != string(domain.ReviewApproved) {
 		t.Fatalf("rounds = %+v", d.Rounds)
 	}
 
@@ -57,11 +59,11 @@ func TestHappyPath(t *testing.T) {
 	h.gh.pr = domain.PRStateMerged
 	h.checkPR()
 	d = h.wantStatus(task.ID, domain.StatusFinished)
-	if d.PullRequest.State != domain.PRStateMerged {
+	if d.PullRequest.State != string(domain.PRStateMerged) {
 		t.Fatalf("pr state = %s", d.PullRequest.State)
 	}
 
-	var list []domain.Task
+	var list []schema.TaskSummary
 	h.rest("GET", "/tasks", nil, &list)
 	if len(list) != 0 {
 		t.Fatalf("finished task still listed: %+v", list)
@@ -132,10 +134,10 @@ func TestCIFailureCountsAsRound(t *testing.T) {
 	h.runner.script(devDone(5), devDone(5), requestChanges("nope"))
 
 	h.runNext()
-	h.gh.ci = []irepository.CIResult{{State: irepository.CIFailure, Summary: "test-job failed"}}
+	h.gh.ci = []usecase.CIResult{{State: usecase.CIFailure, Summary: "test-job failed"}}
 	h.checkCI()
 	d := h.wantStatus(task.ID, domain.StatusFix)
-	if d.Rounds[0].Result != domain.ReviewCIFailed {
+	if d.Rounds[0].Result != string(domain.ReviewCIFailed) {
 		t.Fatalf("round = %+v", d.Rounds[0])
 	}
 
@@ -144,7 +146,7 @@ func TestCIFailureCountsAsRound(t *testing.T) {
 		t.Fatalf("fix prompt does not carry the CI failure:\n%s", fix.Prompt)
 	}
 	h.wantStatus(task.ID, domain.StatusCI)
-	h.gh.ci = []irepository.CIResult{{State: irepository.CISuccess}}
+	h.gh.ci = []usecase.CIResult{{State: usecase.CISuccess}}
 	h.checkCI()
 	h.runNext()
 	h.wantStatus(task.ID, domain.StatusUnresolved)
@@ -158,8 +160,8 @@ func TestCICheckSurvivesGitHubErrors(t *testing.T) {
 	h.runner.script(devDone(1))
 	h.runNext()
 	h.gh.errs = 1
-	h.gh.ci = []irepository.CIResult{{State: irepository.CISuccess}}
-	if err := h.ci.Check(h.ctx, time.Now()); err == nil {
+	h.gh.ci = []usecase.CIResult{{State: usecase.CISuccess}}
+	if err := h.uc.CheckCI(h.ctx, time.Now()); err == nil {
 		t.Fatal("expected the outage to be reported")
 	}
 	h.wantStatus(task.ID, domain.StatusCI)
@@ -187,7 +189,7 @@ func TestSystemErrorsRetryThenError(t *testing.T) {
 		t.Fatal("automatic retry did not resume the session")
 	}
 
-	var retried domain.Task
+	var retried schema.Task
 	if code := h.rest("POST", fmt.Sprintf("/tasks/%d/retry", task.ID), nil, &retried); code != 200 {
 		t.Fatalf("retry = %d", code)
 	}
@@ -226,7 +228,7 @@ func TestBlockedThenEditAndRetry(t *testing.T) {
 	if d.LastError != "blocked: spec contradicts itself" {
 		t.Fatalf("last_error = %q", d.LastError)
 	}
-	var edited domain.Task
+	var edited schema.Task
 	if code := h.rest("PATCH", fmt.Sprintf("/tasks/%d", task.ID), map[string]any{"description": "clearer"}, &edited); code != 200 || edited.Description != "clearer" {
 		t.Fatalf("edit in error = %d %+v", code, edited)
 	}
@@ -282,7 +284,7 @@ func TestQueuePriority(t *testing.T) {
 	h.wantStatus(second.ID, domain.StatusDevelop)
 
 	var queue struct {
-		Tasks []domain.Task `json:"tasks"`
+		Tasks []schema.Task `json:"tasks"`
 	}
 	if err := h.callUser("get_queue", map[string]any{}, &queue); err != nil {
 		t.Fatal(err)
@@ -327,15 +329,28 @@ func TestPriorityMode(t *testing.T) {
 func TestRecoverAfterRestart(t *testing.T) {
 	h := newHarness(t)
 	task := h.createTask("interrupted", "")
-	if _, ok, err := h.queue.Take(h.ctx, time.Now()); !ok || err != nil {
-		t.Fatalf("take: %v %v", ok, err)
+	h.runner.script(hang)
+	ctx, stop := context.WithCancel(h.ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); _, _ = h.uc.RunNext(ctx, time.Now()) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for h.detail(task.ID).Task.Status != string(domain.StatusDeveloping) {
+		if time.Now().After(deadline) {
+			t.Fatal("run did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	stop() // kobo stops while the AI runs
+	<-done
 	h.wantStatus(task.ID, domain.StatusDeveloping)
 	h.nothingReady() // one at a time
-	if err := h.queue.Recover(h.ctx, time.Now()); err != nil {
+	if err := h.uc.RecoverRuns(h.ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	h.wantStatus(task.ID, domain.StatusDevelop)
+	if slices.Contains(h.eventTypes(task.ID), domain.EventSystemError) {
+		t.Fatal("the interrupted run counted as a failure")
+	}
 	h.runner.script(devDone(4))
 	h.runNext()
 	h.wantStatus(task.ID, domain.StatusReview)

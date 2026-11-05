@@ -11,7 +11,7 @@ func (h history) statusBeforeError() (domain.Status, bool) {
 		e := h[i]
 		if e.Type == domain.EventStatusChanged && e.Payload["to"] == string(domain.StatusError) {
 			from, _ := e.Payload["from"].(string)
-			return domain.Status(from).WaitingStatus(), from != ""
+			return waitingStatus(domain.Status(from)), from != ""
 		}
 	}
 	return "", false

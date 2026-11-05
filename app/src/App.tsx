@@ -58,9 +58,20 @@ export function App() {
   selectedRef.current = selected;
   const [detailVersion, setDetailVersion] = useState(0);
 
+  const [paused, setPaused] = useState<boolean | null>(null);
+  const [pausing, setPausing] = useState(false);
+
   const reload = useCallback(() => {
     api.tasks().then((t) => { setTasks(t); setError(''); }, (e: Error) => setError(e.message));
+    api.queueState().then((s) => setPaused(s.paused), (e: Error) => setError(e.message));
   }, []);
+
+  const togglePause = () => {
+    setPausing(true);
+    (paused ? api.resume() : api.pause())
+      .then((s) => { setPaused(s.paused); setError(''); }, (e: Error) => setError(e.message))
+      .finally(() => setPausing(false));
+  };
 
   useEffect(() => {
     reload();
@@ -93,6 +104,15 @@ export function App() {
           <span style={{ fontFamily: 'Inter, sans-serif', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: '#55534e', marginTop: 3 }}>13900K</span>
         </div>
         {error && <span style={{ fontSize: 13, fontWeight: 600, color: '#cf222e' }}>{error}</span>}
+        {paused !== null && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            {paused && <span style={{ fontSize: 13, fontWeight: 700, color: '#cf222e' }}>停止中</span>}
+            <button type="button" className={paused ? 'btn btn-primary' : 'ghost'} disabled={pausing} onClick={togglePause} style={{ height: 32, padding: '0 14px', border: paused ? 'none' : BORDER, background: paused ? '#1f1e1b' : '#ffffff', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: paused ? '#ffffff' : '#1f1e1b', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {pausing && <Spinner color={paused ? '#ffffff' : '#1f1e1b'} />}
+              {paused ? '再開' : 'AI を一時停止'}
+            </button>
+          </div>
+        )}
       </header>
       <main ref={mainRef} style={{ flex: '1 1 0', minHeight: 0, overflow: 'clip', isolation: 'isolate', padding: '20px max(16px, 2.5vw) 16px calc(max(16px, 2.5vw) + 20px)' }}>
         {layout && <Board layout={layout} tasks={tasks} open={setSelected} />}

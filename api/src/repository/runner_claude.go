@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
+	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
 // ClaudeRunner runs Claude Code in headless mode with every permission granted,
@@ -40,9 +40,12 @@ func (r *ClaudeRunner) NewSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// mcpConfig names kobo's server kobo-agent, not kobo: Claude Code shares state
+// such as "needs auth" between servers of the same name, and the user's own kobo
+// server is often configured as kobo.
 func (r *ClaudeRunner) mcpConfig(browserOutputDir string) (string, error) {
 	servers := map[string]any{
-		"kobo": map[string]any{"type": "http", "url": r.agentURL},
+		"kobo-agent": map[string]any{"type": "http", "url": r.agentURL},
 	}
 	if r.browser.installed {
 		servers["playwright"] = r.browser.server(browserOutputDir)
@@ -51,7 +54,7 @@ func (r *ClaudeRunner) mcpConfig(browserOutputDir string) (string, error) {
 	return string(b), err
 }
 
-func (r *ClaudeRunner) Run(ctx context.Context, req irepository.RunRequest) error {
+func (r *ClaudeRunner) Run(ctx context.Context, req usecase.RunRequest) error {
 	if err := os.MkdirAll(r.logDir, 0o755); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -13,11 +14,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/labstack/echo/v4"
+
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/mcp"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/rest"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/web"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/worker"
-	"github.com/Satoru314/Kobo-13900K/api/src/domain"
+	"github.com/Satoru314/Kobo-13900K/api/src/notify"
 	"github.com/Satoru314/Kobo-13900K/api/src/repository"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
@@ -37,58 +40,43 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// repository
-	pg, err := repository.NewPostgres(ctx, cfg.DatabaseURL)
+	db, err := repository.NewDB(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
-	defer pg.Close()
-	if err := pg.Migrate(ctx); err != nil {
+	defer db.Close()
+	pending, err := db.PendingMigrations(ctx)
+	if err != nil {
 		return err
 	}
-	tasks := repository.NewTaskRepository(pg)
-	projectRepo := repository.NewProjectRepository(pg)
-	sessions := repository.NewSessionRepository(pg)
-	prs := repository.NewPullRequestRepository(pg)
-	rounds := repository.NewReviewRoundRepository(pg)
-	events := repository.NewEventRepository(pg)
-	git := repository.NewGit()
-	github := repository.NewGitHub()
-	runner := repository.NewClaudeRunner(cfg.ClaudeBin, "http://"+cfg.Listen+"/mcp/agent", cfg.LogDir)
+	if len(pending) > 0 {
+		return fmt.Errorf("migrations not applied: %v; run make migrate", pending)
+	}
+	agentURL, err := cfg.AgentURL()
+	if err != nil {
+		return err
+	}
+	hub := notify.New()
+	uc := usecase.New(db, repository.NewRepoHost(), repository.NewClaudeRunner(cfg.ClaudeBin, agentURL, cfg.LogDir), hub, cfg.Settings)
 
-	// usecase
-	sig := usecase.NewQueueSignal()
-	changes := usecase.NewChanges()
-	active := usecase.NewActiveRun()
-	projects := usecase.NewProjectUsecase(projectRepo, git, cfg.Settings)
-	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
-	queueUC := usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, projects, runner, git,
-		domain.Queue{OffPeak: cfg.OffPeak}, cfg.Settings, active, sig, changes)
-	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, git, cfg.Settings, active, sig, changes)
-	ciUC := usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, github, cfg.Settings, sig, changes)
-	prUC := usecase.NewPRUsecase(pg, tasks, prs, events, projects, github, changes)
-
-	// controller
-	mux := http.NewServeMux()
-	rest.NewRouter(rest.NewTaskHandler(taskUC), rest.NewProjectHandler(projects),
-		rest.NewQueueHandler(queueUC), rest.NewEventsHandler(changes), rest.NewHealthHandler()).Register(mux)
-	mux.Handle("/", web.Handler())
-	mcpServer := mcp.NewServer(mcp.NewTaskTools(taskUC), mcp.NewProjectTools(projects),
-		mcp.NewQueueTools(queueUC), mcp.NewCompletionTools(completionUC))
-	mux.Handle("/mcp", mcpServer.UserHandler())
-	mux.Handle("/mcp/agent", mcpServer.AgentHandler())
+	e := echo.New()
+	e.HideBanner, e.HidePort = true, true
+	rest.Register(e, uc, hub)
+	e.Any("/mcp", echo.WrapHandler(mcp.UserHandler(uc)))
+	e.Any("/mcp/agent", echo.WrapHandler(mcp.AgentHandler(uc)))
+	e.GET("/*", echo.WrapHandler(web.Handler()))
 	// Requests share ctx, so open /events streams end when kobo shuts down instead of holding Shutdown.
-	srv := &http.Server{Addr: cfg.Listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second,
+	srv := &http.Server{Addr: cfg.Listen, Handler: e, ReadHeaderTimeout: 10 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return ctx }}
 
 	var wg sync.WaitGroup
-	for _, w := range []interface{ Run(context.Context) }{
-		worker.NewQueueWorker(queueUC, sig.C(), 30*time.Second),
-		worker.NewPoller("ci", ciUC, 30*time.Second),
-		worker.NewPoller("pr", prUC, 60*time.Second),
+	for _, run := range []func(){
+		func() { worker.RunQueue(ctx, uc, hub.Wake(), 30*time.Second) },
+		func() { worker.Poll(ctx, "ci", uc.CheckCI, 30*time.Second) },
+		func() { worker.Poll(ctx, "pr", uc.CheckPullRequests, 60*time.Second) },
 	} {
 		wg.Add(1)
-		go func() { defer wg.Done(); w.Run(ctx) }()
+		go func() { defer wg.Done(); run() }()
 	}
 
 	errCh := make(chan error, 1)
