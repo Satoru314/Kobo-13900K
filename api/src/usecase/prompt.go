@@ -26,6 +26,7 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 - ブランチ名は %[4]s のまま使う
 - 質問はできない。迷ったら妥当な方を選んで進め、選んだ内容を PR に書く
 - テストやビルドの方法があれば、PR を出す前に通す
+- 画面の動作確認は Playwright のブラウザで行う
 - 終わったら push し、%[3]s 向けの PR を gh で作る
 
 # PR の本文
@@ -55,6 +56,7 @@ func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewR
 - 指摘ごとに直す。直さないと判断したものは理由を書く
 - 同じブランチ %[4]s に push する（新しい PR は作らない）
 - PR に、何をどう直したか、自分で判断して決めたことをコメントで書く
+- 画面の動作確認は Playwright のブラウザで行う
 
 # 終わり方
 - push したら kobo の complete_development ツールを呼ぶ（PR の URL と要約）
@@ -82,6 +84,7 @@ PR: %[1]s（%[2]d 周目 / 最大 %[3]d 周）
 - バグ、壊れるケース、セキュリティの問題
 - PR に書かれた「自分で判断して決めたこと」が妥当か
 - 好みの問題や細かい書き方は指摘しない。直さないとマージできないものだけを指摘する
+- 画面の動作確認は Playwright のブラウザで行う
 %[7]s
 # 書き方
 - 指摘は gh で PR のレビューコメントとして書く（該当する行に付けられるものは行に付ける）

@@ -128,6 +128,13 @@ AI は `report_blocked` で理由を添えて報告できる（例: 仕様に無
 - **実行時間の上限**：開発と fix は60分、レビューは30分（設定で変えられる）。超えたらプロセスを確実に止めてシステムエラーにする
 - **完了通知の本人確認はしない**：直列なので、通知は常に実行中のタスクのもの。そのため時間切れのプロセスは必ず止め、遅れて届く通知が起きないようにする
 - **レビュー**：レビュー AI は指摘を PR にコメントとして書き、結果を `complete_review` で Kobo に返す
+- **ブラウザ**：AI を起動するとき、Kobo の MCP と並べて Playwright の MCP サーバー（`@playwright/mcp`）を渡す。画面の動作確認はこれで行う
+  - ヘッドレスの chromium で動かす。プロファイルはメモリ上に置き、タスクの間で共有しない
+  - スナップショットなどの出力先は `{log_dir}/playwright/{ログ名}`。worktree に出すと AI が誤って commit しかねないため
+  - `@playwright/mcp` のバージョンは固定する。chromium のビルドがバージョンに紐づくため、上げるときはコードの定数を変える
+  - Kobo が起動してから最初の実行の前に `npx playwright install chromium` を流す（入っていれば何もしない）
+  - `npx` は Kobo の PATH から探し、なければ対話シェルの PATH から探す。systemd の下ではシェルの設定が読まれず、nvm などの node が PATH に載らないため。別のものを使うときは Kobo の環境変数 PATH で指定する
+  - `npx` が見つからない、chromium を入れられないときは、実行ログに書いてブラウザなしで AI を起動する。画面に関係しないタスクまで止めないため。次の実行でまた試す
 
 ### 作業ディレクトリ
 
@@ -213,6 +220,7 @@ Kobo が AI を起動・resume するときに渡す文章。`{...}` は Kobo �
 - ブランチ名は kobo/task-{task_id}
 - 質問はできない。迷ったら妥当な方を選んで進め、選んだ内容を PR に書く
 - テストやビルドの方法があれば、PR を出す前に通す
+- 画面の動作確認は Playwright のブラウザで行う
 - 終わったら push し、{default_branch} 向けの PR を gh で作る
 
 # PR の本文
@@ -239,6 +247,7 @@ PR {pr_url} に次の指摘がありました。対応してください。
 - 指摘ごとに直す。直さないと判断したものは理由を書く
 - 同じブランチに push する（新しい PR は作らない）
 - PR に、何をどう直したか、自分で判断して決めたことをコメントで書く
+- 画面の動作確認は Playwright のブラウザで行う
 
 # 終わり方
 - push したら complete_development を呼ぶ
@@ -260,6 +269,7 @@ PR: {pr_url}（{round_no} 周目 / 最大 {max_rounds} 周）
 - バグ、壊れるケース、セキュリティの問題
 - PR に書かれた「自分で判断して決めたこと」が妥当か
 - 好みの問題や細かい書き方は指摘しない。直さないとマージできないものだけを指摘する
+- 画面の動作確認は Playwright のブラウザで行う
 
 # 書き方
 - 指摘は gh で PR のレビューコメントとして書く（該当する行に付けられるものは行に付ける）
@@ -353,7 +363,7 @@ erDiagram
  │ kobo (Go, systemd で常駐)                      │
  │  ├ rest / mcp  REST と MCP の受け口            │
  │  ├ scheduler   キューから次の task を取り出す  │
- │  ├ runner      AI を起動・resume する          │──▶ claude CLI（satoru314 として実行）
+ │  ├ runner      AI を起動・resume する          │──▶ claude CLI（satoru314 として実行）──▶ Playwright MCP（headless chromium）
  │  ├ watcher     CI と PR の状態をポーリング     │──▶ GitHub
  │  └ worktree    worktree の作成・削除           │──▶ ~/programF 配下
  │ postgres (Docker)                              │
@@ -455,6 +465,7 @@ Kobo-13900K/
 │           ├── review_round.go
 │           ├── event.go
 │           ├── runner_claude.go   Claude 用の runner（AI を足すときは runner_<名前>.go）
+│           ├── playwright.go      AI に渡すブラウザ（Playwright MCP）の準備
 │           ├── github.go
 │           └── git.go
 │

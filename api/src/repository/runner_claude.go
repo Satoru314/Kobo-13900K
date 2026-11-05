@@ -8,18 +8,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
 // ClaudeRunner runs Claude Code in headless mode with every permission granted,
-// connected to kobo's agent MCP endpoint so it can report back.
+// connected to kobo's agent MCP endpoint so it can report back, and to a headless
+// browser so it can check screens.
 type ClaudeRunner struct {
 	bin      string
 	agentURL string
 	logDir   string
+	browser  playwright
 }
 
 func NewClaudeRunner(bin, agentURL, logDir string) *ClaudeRunner {
@@ -39,19 +40,18 @@ func (r *ClaudeRunner) NewSessionID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func (r *ClaudeRunner) mcpConfig() (string, error) {
-	cfg := map[string]any{"mcpServers": map[string]any{
+func (r *ClaudeRunner) mcpConfig(browserOutputDir string) (string, error) {
+	servers := map[string]any{
 		"kobo": map[string]any{"type": "http", "url": r.agentURL},
-	}}
-	b, err := json.Marshal(cfg)
+	}
+	if r.browser.installed {
+		servers["playwright"] = r.browser.server(browserOutputDir)
+	}
+	b, err := json.Marshal(map[string]any{"mcpServers": servers})
 	return string(b), err
 }
 
 func (r *ClaudeRunner) Run(ctx context.Context, req irepository.RunRequest) error {
-	mcp, err := r.mcpConfig()
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(r.logDir, 0o755); err != nil {
 		return err
 	}
@@ -61,6 +61,15 @@ func (r *ClaudeRunner) Run(ctx context.Context, req irepository.RunRequest) erro
 	}
 	defer logFile.Close()
 	fmt.Fprintf(logFile, "\n===== %s %s session=%s resume=%v\n", time.Now().Format(time.RFC3339), req.Role, req.SessionID, req.Resume)
+
+	// Most tasks don't need the browser, so they go on without it.
+	if err := r.browser.prepare(ctx, r.logDir, logFile); err != nil {
+		fmt.Fprintf(logFile, "kobo: running without the Playwright browser: %v\n", err)
+	}
+	mcp, err := r.mcpConfig(filepath.Join(r.logDir, "playwright", req.LogName))
+	if err != nil {
+		return err
+	}
 
 	args := []string{"-p", "--dangerously-skip-permissions", "--mcp-config", mcp, "--output-format", "stream-json", "--verbose"}
 	if req.Resume {
@@ -72,9 +81,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, req irepository.RunRequest) erro
 	cmd.Dir = req.WorkDir
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	// Kill the whole process group so commands the AI started die with it.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = 5 * time.Second
+	killGroupOnCancel(cmd)
 	if err := cmd.Run(); err != nil && ctx.Err() == nil {
 		return fmt.Errorf("claude exited: %w (log: %s)", err, logFile.Name())
 	}
