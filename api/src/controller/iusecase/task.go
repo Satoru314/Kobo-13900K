@@ -11,7 +11,7 @@ import (
 
 type TaskUsecase interface {
 	Create(ctx context.Context, in usecase.CreateTaskInput, now time.Time) (domain.Task, error)
-	List(ctx context.Context, in usecase.ListTasksInput) ([]domain.Task, error)
+	List(ctx context.Context, in usecase.ListTasksInput) ([]usecase.TaskSummary, error)
 	Get(ctx context.Context, id int64) (usecase.TaskDetail, error)
 	Events(ctx context.Context, id int64) ([]domain.Event, error)
 	Update(ctx context.Context, in usecase.UpdateTaskInput, now time.Time) (domain.Task, error)

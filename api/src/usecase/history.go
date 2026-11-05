@@ -17,6 +17,17 @@ func (h history) statusBeforeError() (domain.Status, bool) {
 	return "", false
 }
 
+// lastCIState is the state of the latest CI result, empty when CI never reported.
+func (h history) lastCIState() string {
+	for i := len(h) - 1; i >= 0; i-- {
+		if h[i].Type == domain.EventCIResult {
+			state, _ := h[i].Payload["state"].(string)
+			return state
+		}
+	}
+	return ""
+}
+
 // failuresInARow counts system errors since the task last made progress.
 func (h history) failuresInARow() int {
 	n := 0

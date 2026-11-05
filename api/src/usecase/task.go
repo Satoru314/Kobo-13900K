@@ -18,13 +18,14 @@ type TaskUsecase struct {
 	events   irepository.EventRepository
 	projects *ProjectUsecase
 	signal   *QueueSignal
+	changes  *Changes
 	track    tracker
 }
 
 func NewTaskUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, prs irepository.PullRequestRepository,
-	rounds irepository.ReviewRoundRepository, events irepository.EventRepository, projects *ProjectUsecase, signal *QueueSignal) *TaskUsecase {
+	rounds irepository.ReviewRoundRepository, events irepository.EventRepository, projects *ProjectUsecase, signal *QueueSignal, changes *Changes) *TaskUsecase {
 	return &TaskUsecase{tx: tx, tasks: tasks, prs: prs, rounds: rounds, events: events,
-		projects: projects, signal: signal, track: newTracker(tasks, events)}
+		projects: projects, signal: signal, changes: changes, track: newTracker(tasks, events)}
 }
 
 type CreateTaskInput struct {
@@ -55,6 +56,7 @@ func (u *TaskUsecase) Create(ctx context.Context, in CreateTaskInput, now time.T
 	})
 	if err == nil {
 		u.signal.Notify()
+		u.changes.Publish(task.ID)
 	}
 	return task, err
 }
@@ -64,7 +66,18 @@ type ListTasksInput struct {
 	IncludeHidden bool            `json:"include_hidden,omitempty" jsonschema:"also list finished and cancelled tasks"`
 }
 
-func (u *TaskUsecase) List(ctx context.Context, in ListTasksInput) ([]domain.Task, error) {
+// TaskSummary is a task with what its card in the list shows.
+type TaskSummary struct {
+	domain.Task
+	// Project is the project's directory name.
+	Project  string `json:"project"`
+	PRURL    string `json:"pr_url,omitempty"`
+	PRNumber int    `json:"pr_number,omitempty"`
+	// CI is pending, success or failure: the state of the latest CI run, empty when CI never ran.
+	CI string `json:"ci,omitempty"`
+}
+
+func (u *TaskUsecase) List(ctx context.Context, in ListTasksInput) ([]TaskSummary, error) {
 	for _, s := range in.Statuses {
 		if !s.Valid() {
 			return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidInput, s)
@@ -74,13 +87,48 @@ func (u *TaskUsecase) List(ctx context.Context, in ListTasksInput) ([]domain.Tas
 	if err != nil {
 		return nil, err
 	}
-	out := []domain.Task{}
+	projects, err := u.projects.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dirs := map[int64]string{}
+	for _, p := range projects {
+		dirs[p.ID] = p.Dir
+	}
+	out := []TaskSummary{}
 	for _, t := range all {
-		if in.IncludeHidden || len(in.Statuses) > 0 || !t.Status.Hidden() {
-			out = append(out, t)
+		if !in.IncludeHidden && len(in.Statuses) == 0 && t.Status.Hidden() {
+			continue
 		}
+		s, err := u.summary(ctx, t, dirs[t.ProjectID])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
 	}
 	return out, nil
+}
+
+func (u *TaskUsecase) summary(ctx context.Context, t domain.Task, dir string) (TaskSummary, error) {
+	s := TaskSummary{Task: t, Project: dir}
+	pr, err := u.prs.GetByTask(ctx, t.ID)
+	if errors.Is(err, irepository.ErrNotFound) {
+		return s, nil
+	}
+	if err != nil {
+		return TaskSummary{}, err
+	}
+	s.PRURL, s.PRNumber = pr.URL, pr.Number
+	if t.Status == domain.StatusCI {
+		s.CI = string(irepository.CIPending)
+		return s, nil
+	}
+	events, err := u.events.ListByTask(ctx, t.ID)
+	if err != nil {
+		return TaskSummary{}, err
+	}
+	s.CI = history(events).lastCIState()
+	return s, nil
 }
 
 type TaskDetail struct {
@@ -153,6 +201,9 @@ func (u *TaskUsecase) Update(ctx context.Context, in UpdateTaskInput, now time.T
 		}
 		return u.tasks.Update(ctx, task)
 	})
+	if err == nil {
+		u.changes.Publish(task.ID)
+	}
 	return task, err
 }
 
@@ -168,6 +219,9 @@ func (u *TaskUsecase) Cancel(ctx context.Context, id int64, now time.Time) (doma
 		}
 		return nil
 	})
+	if err == nil {
+		u.changes.Publish(task.ID)
+	}
 	return task, err
 }
 
@@ -197,6 +251,7 @@ func (u *TaskUsecase) Retry(ctx context.Context, id int64, now time.Time) (domai
 	})
 	if err == nil {
 		u.signal.Notify()
+		u.changes.Publish(task.ID)
 	}
 	return task, err
 }

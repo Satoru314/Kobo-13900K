@@ -17,16 +17,17 @@ type CIUsecase struct {
 	github   irepository.GitHub
 	settings Settings
 	signal   *QueueSignal
+	changes  *Changes
 	track    tracker
 	book     roundBook
 }
 
 func NewCIUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, prs irepository.PullRequestRepository,
 	rounds irepository.ReviewRoundRepository, events irepository.EventRepository, projects *ProjectUsecase,
-	github irepository.GitHub, settings Settings, signal *QueueSignal) *CIUsecase {
+	github irepository.GitHub, settings Settings, signal *QueueSignal, changes *Changes) *CIUsecase {
 	track := newTracker(tasks, events)
 	return &CIUsecase{tx: tx, tasks: tasks, prs: prs, projects: projects, github: github, settings: settings,
-		signal: signal, track: track, book: newRoundBook(rounds, track)}
+		signal: signal, changes: changes, track: track, book: newRoundBook(rounds, track)}
 }
 
 // Check looks at the CI of every task in ci and moves the finished ones on.
@@ -85,6 +86,7 @@ func (u *CIUsecase) checkTask(ctx context.Context, taskID int64, now time.Time) 
 	})
 	if err == nil {
 		u.signal.Notify()
+		u.changes.Publish(taskID)
 	}
 	return err
 }

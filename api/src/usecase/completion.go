@@ -29,15 +29,17 @@ type CompletionUsecase struct {
 	settings Settings
 	active   *ActiveRun
 	signal   *QueueSignal
+	changes  *Changes
 	track    tracker
 	book     roundBook
 }
 
 func NewCompletionUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, sessions irepository.SessionRepository,
 	prs irepository.PullRequestRepository, rounds irepository.ReviewRoundRepository, events irepository.EventRepository,
-	projects *ProjectUsecase, git irepository.Git, settings Settings, active *ActiveRun, signal *QueueSignal) *CompletionUsecase {
+	projects *ProjectUsecase, git irepository.Git, settings Settings, active *ActiveRun, signal *QueueSignal, changes *Changes) *CompletionUsecase {
 	return &CompletionUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events,
-		projects: projects, git: git, settings: settings, active: active, signal: signal, track: newTracker(tasks, events),
+		projects: projects, git: git, settings: settings, active: active, signal: signal, changes: changes,
+		track: newTracker(tasks, events),
 		book: newRoundBook(rounds, newTracker(tasks, events))}
 }
 
@@ -68,6 +70,7 @@ func (u *CompletionUsecase) finish(taskID int64, err error) error {
 	if err == nil {
 		u.active.stop(taskID)
 		u.signal.Notify()
+		u.changes.Publish(taskID)
 	}
 	return err
 }

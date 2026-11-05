@@ -20,12 +20,14 @@ type PRUsecase struct {
 	prs      irepository.PullRequestRepository
 	projects *ProjectUsecase
 	github   irepository.GitHub
+	changes  *Changes
 	track    tracker
 }
 
 func NewPRUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, prs irepository.PullRequestRepository,
-	events irepository.EventRepository, projects *ProjectUsecase, github irepository.GitHub) *PRUsecase {
-	return &PRUsecase{tx: tx, tasks: tasks, prs: prs, projects: projects, github: github, track: newTracker(tasks, events)}
+	events irepository.EventRepository, projects *ProjectUsecase, github irepository.GitHub, changes *Changes) *PRUsecase {
+	return &PRUsecase{tx: tx, tasks: tasks, prs: prs, projects: projects, github: github, changes: changes,
+		track: newTracker(tasks, events)}
 }
 
 // Check finishes tasks whose PR was merged or closed. Running tasks are left
@@ -63,7 +65,7 @@ func (u *PRUsecase) checkTask(ctx context.Context, task domain.Task, now time.Ti
 	if err != nil || info.State == domain.PRStateOpen {
 		return err
 	}
-	return u.tx.InTx(ctx, func(ctx context.Context) error {
+	err = u.tx.InTx(ctx, func(ctx context.Context) error {
 		task, err := u.tasks.GetForUpdate(ctx, task.ID)
 		if err != nil || !task.Status.CanMoveTo(domain.StatusFinished) {
 			return err
@@ -74,4 +76,8 @@ func (u *PRUsecase) checkTask(ctx context.Context, task domain.Task, now time.Ti
 		}
 		return u.track.move(ctx, &task, domain.StatusFinished, "pull request "+string(info.State), now)
 	})
+	if err == nil {
+		u.changes.Publish(task.ID)
+	}
+	return err
 }

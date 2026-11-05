@@ -25,7 +25,7 @@ type TaskID struct {
 }
 
 type TaskList struct {
-	Tasks []domain.Task `json:"tasks"`
+	Tasks []usecase.TaskSummary `json:"tasks"`
 }
 
 type EventList struct {

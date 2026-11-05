@@ -7,16 +7,19 @@ type Router struct {
 	tasks    *TaskHandler
 	projects *ProjectHandler
 	queue    *QueueHandler
+	events   *EventsHandler
 	health   *HealthHandler
 }
 
-func NewRouter(tasks *TaskHandler, projects *ProjectHandler, queue *QueueHandler, health *HealthHandler) *Router {
-	return &Router{tasks: tasks, projects: projects, queue: queue, health: health}
+func NewRouter(tasks *TaskHandler, projects *ProjectHandler, queue *QueueHandler, events *EventsHandler, health *HealthHandler) *Router {
+	return &Router{tasks: tasks, projects: projects, queue: queue, events: events, health: health}
 }
 
 // Register adds every REST route to mux.
 func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /projects", rt.projects.List)
+	mux.HandleFunc("GET /projects/candidates", rt.projects.Candidates)
+	mux.HandleFunc("POST /projects", rt.projects.Add)
 	mux.HandleFunc("POST /tasks", rt.tasks.Create)
 	mux.HandleFunc("GET /tasks", rt.tasks.List)
 	mux.HandleFunc("GET /tasks/{id}", rt.tasks.Get)
@@ -25,5 +28,6 @@ func (rt *Router) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /tasks/{id}/cancel", rt.tasks.Cancel)
 	mux.HandleFunc("POST /tasks/{id}/retry", rt.tasks.Retry)
 	mux.HandleFunc("GET /queue", rt.queue.List)
+	mux.HandleFunc("GET /events", rt.events.Stream)
 	mux.HandleFunc("GET /health", rt.health.Get)
 }

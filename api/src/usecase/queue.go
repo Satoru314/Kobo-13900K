@@ -30,6 +30,7 @@ type QueueUsecase struct {
 	settings Settings
 	active   *ActiveRun
 	signal   *QueueSignal
+	changes  *Changes
 	track    tracker
 	prompts  prompts
 }
@@ -37,9 +38,10 @@ type QueueUsecase struct {
 func NewQueueUsecase(tx irepository.Transactor, tasks irepository.TaskRepository, sessions irepository.SessionRepository,
 	prs irepository.PullRequestRepository, rounds irepository.ReviewRoundRepository, events irepository.EventRepository,
 	projects *ProjectUsecase, runner irepository.Runner, git irepository.Git, queue domain.Queue, settings Settings,
-	active *ActiveRun, signal *QueueSignal) *QueueUsecase {
+	active *ActiveRun, signal *QueueSignal, changes *Changes) *QueueUsecase {
 	return &QueueUsecase{tx: tx, tasks: tasks, sessions: sessions, prs: prs, rounds: rounds, events: events,
 		projects: projects, runner: runner, git: git, queue: queue, settings: settings, active: active, signal: signal,
+		changes: changes,
 		track: newTracker(tasks, events), prompts: prompts{maxRounds: settings.MaxReviewRounds}}
 }
 
@@ -110,6 +112,9 @@ func (u *QueueUsecase) Take(ctx context.Context, now time.Time) (Run, bool, erro
 		found = true
 		return nil
 	})
+	if err == nil && found {
+		u.changes.Publish(run.Task.ID)
+	}
 	return run, found, err
 }
 
@@ -229,6 +234,9 @@ func (u *QueueUsecase) Settle(ctx context.Context, run Run, runErr error, now ti
 		return u.fail(ctx, &task, msg, now)
 	})
 	u.signal.Notify()
+	if err == nil {
+		u.changes.Publish(run.Task.ID)
+	}
 	return err
 }
 
@@ -252,7 +260,8 @@ func (u *QueueUsecase) fail(ctx context.Context, task *domain.Task, msg string, 
 
 // Recover puts back tasks left running when kobo stopped. It does not count as a failure.
 func (u *QueueUsecase) Recover(ctx context.Context, now time.Time) error {
-	return u.tx.InTx(ctx, func(ctx context.Context) error {
+	var recovered []int64
+	err := u.tx.InTx(ctx, func(ctx context.Context) error {
 		tasks, err := u.tasks.List(ctx, queueStatuses...)
 		if err != nil {
 			return err
@@ -267,7 +276,14 @@ func (u *QueueUsecase) Recover(ctx context.Context, now time.Time) error {
 			if err := u.tasks.Update(ctx, t); err != nil {
 				return err
 			}
+			recovered = append(recovered, t.ID)
 		}
 		return nil
 	})
+	if err == nil {
+		for _, id := range recovered {
+			u.changes.Publish(id)
+		}
+	}
+	return err
 }

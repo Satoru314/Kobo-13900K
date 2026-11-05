@@ -118,6 +118,14 @@ func (g *fakeGit) Remote(context.Context, string) (irepository.RemoteInfo, error
 	return irepository.RemoteInfo{Owner: "me", Name: "sandbox", DefaultBranch: "main"}, nil
 }
 
+// GitHubOrigin treats every repository as on GitHub except one named "local".
+func (g *fakeGit) GitHubOrigin(_ context.Context, repoDir string) (string, string, bool, error) {
+	if filepath.Base(repoDir) == "local" {
+		return "", "", false, nil
+	}
+	return "me", filepath.Base(repoDir), true, nil
+}
+
 func (g *fakeGit) AddWorktree(_ context.Context, _, path, branch, base string) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -178,6 +186,7 @@ type harness struct {
 	t      *testing.T
 	ctx    context.Context
 	srv    *httptest.Server
+	dir    string // projects directory
 	queue  *usecase.QueueUsecase
 	ci     *usecase.CIUsecase
 	pr     *usecase.PRUsecase
@@ -216,7 +225,7 @@ func newHarness(t *testing.T) *harness {
 		DevTimeout: 3 * time.Second, ReviewTimeout: 3 * time.Second, MaxAutoRetries: 2, RetryDelay: 0,
 	}
 	h := &harness{t: t, ctx: ctx, runner: &fakeRunner{}, git: &fakeGit{worktrees: map[string]string{}},
-		gh: &fakeGitHub{}, wt: settings.WorktreesDir}
+		gh: &fakeGitHub{}, wt: settings.WorktreesDir, dir: projectsDir}
 
 	tasks := repository.NewTaskRepository(pg)
 	sessions := repository.NewSessionRepository(pg)
@@ -224,18 +233,19 @@ func newHarness(t *testing.T) *harness {
 	rounds := repository.NewReviewRoundRepository(pg)
 	events := repository.NewEventRepository(pg)
 	sig := usecase.NewQueueSignal()
+	changes := usecase.NewChanges()
 	active := usecase.NewActiveRun()
 	projects := usecase.NewProjectUsecase(repository.NewProjectRepository(pg), h.git, settings)
-	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig)
+	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
 	h.queue = usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.runner, h.git,
-		domain.Queue{}, settings, active, sig)
-	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.git, settings, active, sig)
-	h.ci = usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, h.gh, settings, sig)
-	h.pr = usecase.NewPRUsecase(pg, tasks, prs, events, projects, h.gh)
+		domain.Queue{}, settings, active, sig, changes)
+	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.git, settings, active, sig, changes)
+	h.ci = usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, h.gh, settings, sig, changes)
+	h.pr = usecase.NewPRUsecase(pg, tasks, prs, events, projects, h.gh, changes)
 
 	mux := http.NewServeMux()
 	rest.NewRouter(rest.NewTaskHandler(taskUC), rest.NewProjectHandler(projects),
-		rest.NewQueueHandler(h.queue), rest.NewHealthHandler()).Register(mux)
+		rest.NewQueueHandler(h.queue), rest.NewEventsHandler(changes), rest.NewHealthHandler()).Register(mux)
 	m := mcp.NewServer(mcp.NewTaskTools(taskUC), mcp.NewProjectTools(projects),
 		mcp.NewQueueTools(h.queue), mcp.NewCompletionTools(completionUC))
 	mux.Handle("/mcp", m.UserHandler())

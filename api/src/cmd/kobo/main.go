@@ -14,6 +14,7 @@ import (
 
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/mcp"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/rest"
+	"github.com/Satoru314/Kobo-13900K/api/src/controller/web"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/worker"
 	"github.com/Satoru314/Kobo-13900K/api/src/domain"
 	"github.com/Satoru314/Kobo-13900K/api/src/repository"
@@ -56,19 +57,21 @@ func run() error {
 
 	// usecase
 	sig := usecase.NewQueueSignal()
+	changes := usecase.NewChanges()
 	active := usecase.NewActiveRun()
 	projects := usecase.NewProjectUsecase(projectRepo, git, cfg.Settings)
-	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig)
+	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
 	queueUC := usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, projects, runner, git,
-		domain.Queue{OffPeak: cfg.OffPeak}, cfg.Settings, active, sig)
-	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, git, cfg.Settings, active, sig)
-	ciUC := usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, github, cfg.Settings, sig)
-	prUC := usecase.NewPRUsecase(pg, tasks, prs, events, projects, github)
+		domain.Queue{OffPeak: cfg.OffPeak}, cfg.Settings, active, sig, changes)
+	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, git, cfg.Settings, active, sig, changes)
+	ciUC := usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, github, cfg.Settings, sig, changes)
+	prUC := usecase.NewPRUsecase(pg, tasks, prs, events, projects, github, changes)
 
 	// controller
 	mux := http.NewServeMux()
 	rest.NewRouter(rest.NewTaskHandler(taskUC), rest.NewProjectHandler(projects),
-		rest.NewQueueHandler(queueUC), rest.NewHealthHandler()).Register(mux)
+		rest.NewQueueHandler(queueUC), rest.NewEventsHandler(changes), rest.NewHealthHandler()).Register(mux)
+	mux.Handle("/", web.Handler())
 	mcpServer := mcp.NewServer(mcp.NewTaskTools(taskUC), mcp.NewProjectTools(projects),
 		mcp.NewQueueTools(queueUC), mcp.NewCompletionTools(completionUC))
 	mux.Handle("/mcp", mcpServer.UserHandler())

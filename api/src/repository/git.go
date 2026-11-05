@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,19 +27,37 @@ func NewGit() *Git {
 var githubRemote = regexp.MustCompile(`github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$`)
 
 func (g *Git) Remote(ctx context.Context, repoDir string) (irepository.RemoteInfo, error) {
-	url, err := g.cmd.output(ctx, repoDir, "git", "remote", "get-url", "origin")
+	owner, name, ok, err := g.GitHubOrigin(ctx, repoDir)
 	if err != nil {
 		return irepository.RemoteInfo{}, err
 	}
-	m := githubRemote.FindStringSubmatch(url)
-	if m == nil {
-		return irepository.RemoteInfo{}, fmt.Errorf("origin %q is not a GitHub repository", url)
+	if !ok {
+		return irepository.RemoteInfo{}, fmt.Errorf("origin of %s is not a GitHub repository", repoDir)
 	}
 	branch, err := g.defaultBranch(ctx, repoDir)
 	if err != nil {
 		return irepository.RemoteInfo{}, err
 	}
-	return irepository.RemoteInfo{Owner: m[1], Name: m[2], DefaultBranch: branch}, nil
+	return irepository.RemoteInfo{Owner: owner, Name: name, DefaultBranch: branch}, nil
+}
+
+func (g *Git) GitHubOrigin(ctx context.Context, repoDir string) (owner, name string, ok bool, err error) {
+	remotes, err := g.cmd.output(ctx, repoDir, "git", "remote")
+	if err != nil {
+		return "", "", false, err
+	}
+	if !slices.Contains(strings.Fields(remotes), "origin") {
+		return "", "", false, nil
+	}
+	url, err := g.cmd.output(ctx, repoDir, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", false, err
+	}
+	m := githubRemote.FindStringSubmatch(url)
+	if m == nil {
+		return "", "", false, nil
+	}
+	return m[1], m[2], true, nil
 }
 
 // defaultBranch asks origin which branch HEAD points to.

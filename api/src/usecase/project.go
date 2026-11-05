@@ -33,6 +33,67 @@ func (u *ProjectUsecase) Get(ctx context.Context, id int64) (domain.Project, err
 	return u.projects.Get(ctx, id)
 }
 
+type CandidateProblem string
+
+const (
+	ProblemNotGit    CandidateProblem = "not_git"
+	ProblemNotGitHub CandidateProblem = "not_github"
+)
+
+// ProjectCandidate is a directory under the projects directory that can be registered as a project.
+type ProjectCandidate struct {
+	Dir        string `json:"dir"`
+	Registered bool   `json:"registered"`
+	// Problem says why it cannot be registered.
+	Problem CandidateProblem `json:"problem,omitempty"`
+}
+
+// Candidates lists every directory under the projects directory, in name order.
+func (u *ProjectUsecase) Candidates(ctx context.Context) ([]ProjectCandidate, error) {
+	entries, err := os.ReadDir(u.settings.ProjectsDir)
+	if err != nil {
+		return nil, err
+	}
+	projects, err := u.projects.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	registered := map[string]bool{}
+	for _, p := range projects {
+		registered[p.Dir] = true
+	}
+	out := []ProjectCandidate{}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		c := ProjectCandidate{Dir: e.Name(), Registered: registered[e.Name()]}
+		if !c.Registered {
+			if c.Problem, err = u.problem(ctx, filepath.Join(u.settings.ProjectsDir, e.Name())); err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+func (u *ProjectUsecase) problem(ctx context.Context, path string) (CandidateProblem, error) {
+	if _, err := os.Stat(filepath.Join(path, ".git")); errors.Is(err, os.ErrNotExist) {
+		return ProblemNotGit, nil
+	} else if err != nil {
+		return "", err
+	}
+	_, _, ok, err := u.git.GitHubOrigin(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return ProblemNotGitHub, nil
+	}
+	return "", nil
+}
+
 // Dir is the project's checkout on disk.
 func (u *ProjectUsecase) Dir(p domain.Project) string {
 	return filepath.Join(u.settings.ProjectsDir, p.Dir)
