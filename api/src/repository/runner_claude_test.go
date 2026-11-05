@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
+	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
 type mcpEntry struct {
@@ -60,7 +60,7 @@ exit `+code)
 
 func (e *runnerEnv) run() map[string]mcpEntry {
 	e.t.Helper()
-	err := e.runner.Run(context.Background(), irepository.RunRequest{
+	err := e.runner.Run(context.Background(), usecase.RunRequest{
 		SessionID: "s", WorkDir: e.root, Prompt: "p", LogName: "task-1",
 	})
 	if err != nil {

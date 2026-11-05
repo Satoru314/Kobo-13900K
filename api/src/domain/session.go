@@ -9,12 +9,14 @@ const (
 	RoleReview Role = "review"
 )
 
+func (r Role) Valid() bool { return r == RoleDev || r == RoleReview }
+
 // Session is one AI conversation. A task has at most one per role, resumed on later runs.
 type Session struct {
-	ID                int64     `json:"id"`
-	TaskID            int64     `json:"task_id"`
-	Role              Role      `json:"role"`
-	Provider          string    `json:"provider"`
-	ExternalSessionID string    `json:"external_session_id"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                int64
+	TaskID            int64
+	Role              Role
+	Provider          string
+	ExternalSessionID string
+	CreatedAt         time.Time
 }

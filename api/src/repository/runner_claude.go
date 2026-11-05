@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
+	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
 // ClaudeRunner runs Claude Code in headless mode with every permission granted,
@@ -54,7 +54,7 @@ func (r *ClaudeRunner) mcpConfig(browserOutputDir string) (string, error) {
 	return string(b), err
 }
 
-func (r *ClaudeRunner) Run(ctx context.Context, req irepository.RunRequest) error {
+func (r *ClaudeRunner) Run(ctx context.Context, req usecase.RunRequest) error {
 	if err := os.MkdirAll(r.logDir, 0o755); err != nil {
 		return err
 	}

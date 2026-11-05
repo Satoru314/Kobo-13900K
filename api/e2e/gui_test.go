@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Satoru314/Kobo-13900K/api/src/controller/schema"
 	"github.com/Satoru314/Kobo-13900K/api/src/domain"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
 // The list carries what a card shows: project, PR and CI state.
@@ -21,7 +21,7 @@ func TestListShowsPRAndCI(t *testing.T) {
 	h := newHarness(t)
 	h.git.workflows = true
 	task := h.createTask("card", "")
-	var list []usecase.TaskSummary
+	var list []schema.TaskSummary
 	h.rest("GET", "/tasks", nil, &list)
 	if len(list) != 1 || list[0].Project != "sandbox" || list[0].PRURL != "" || list[0].CI != "" {
 		t.Fatalf("before PR: %+v", list)
@@ -34,7 +34,7 @@ func TestListShowsPRAndCI(t *testing.T) {
 		t.Fatalf("in ci: %+v", list[0])
 	}
 
-	h.gh.ci = []irepository.CIResult{{State: irepository.CIFailure, Summary: "x"}}
+	h.gh.ci = []usecase.CIResult{{State: usecase.CIFailure, Summary: "x"}}
 	h.checkCI()
 	h.wantStatus(task.ID, domain.StatusFix)
 	h.rest("GET", "/tasks", nil, &list)
@@ -53,14 +53,14 @@ func TestProjectCandidatesAndAdd(t *testing.T) {
 	}
 	h.createTask("registers sandbox", "")
 
-	var got []usecase.ProjectCandidate
+	var got []schema.ProjectCandidate
 	if code := h.rest("GET", "/projects/candidates", nil, &got); code != 200 {
 		t.Fatalf("candidates = %d", code)
 	}
-	want := []usecase.ProjectCandidate{
-		{Dir: "local", Problem: usecase.ProblemNotGitHub},
+	want := []schema.ProjectCandidate{
+		{Dir: "local", Problem: string(usecase.ProblemNotGitHub)},
 		{Dir: "other"},
-		{Dir: "plain", Problem: usecase.ProblemNotGit},
+		{Dir: "plain", Problem: string(usecase.ProblemNotGit)},
 		{Dir: "sandbox", Registered: true},
 	}
 	if len(got) != len(want) {
@@ -72,7 +72,7 @@ func TestProjectCandidatesAndAdd(t *testing.T) {
 		}
 	}
 
-	var p domain.Project
+	var p schema.Project
 	if code := h.rest("POST", "/projects", map[string]any{"dir": "other"}, &p); code != 201 || p.Dir != "other" {
 		t.Fatalf("add = %d %+v", code, p)
 	}
@@ -108,13 +108,13 @@ func TestEventsStream(t *testing.T) {
 	}
 
 	task := h.createTask("watched", "")
-	if got := next(); got != `{"task_id": 1}` || task.ID != 1 {
+	if got := next(); got != `{"task_id":1}` || task.ID != 1 {
 		t.Fatalf("after create: %s (task %d)", got, task.ID)
 	}
 	h.runner.script(devDone(3))
 	h.runNext()
 	for range 2 { // taken out, then the AI reported
-		if got := next(); got != `{"task_id": 1}` {
+		if got := next(); got != `{"task_id":1}` {
 			t.Fatalf("after run: %s", got)
 		}
 	}
@@ -129,7 +129,7 @@ func TestPauseAndResume(t *testing.T) {
 	done := make(chan struct{})
 	go func() { defer close(done); h.runNext() }()
 	deadline := time.Now().Add(5 * time.Second)
-	for h.detail(task.ID).Task.Status != domain.StatusDeveloping {
+	for h.detail(task.ID).Task.Status != string(domain.StatusDeveloping) {
 		if time.Now().After(deadline) {
 			t.Fatal("run did not start")
 		}

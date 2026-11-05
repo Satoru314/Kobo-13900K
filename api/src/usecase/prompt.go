@@ -38,7 +38,7 @@ func (p prompts) develop(t domain.Task, pj domain.Project, workDir string) strin
 - PR を作ったら kobo-agent の complete_development ツールを呼ぶ（PR の URL と要約）
 - 進められない場合（仕様に無理がある、外部の問題でテストや CI が通らない等）は、PR を作らずに kobo-agent の report_blocked ツールを呼び、理由を書く
 - どちらかを呼んだら、それ以上は何もしない
-`, workDir, pj.FullName(), pj.DefaultBranch, t.Branch(), t.Title, t.Description)
+`, workDir, fullName(pj), pj.DefaultBranch, branch(t), t.Title, t.Description)
 }
 
 func (p prompts) fix(pr domain.PullRequest, workDir string, round domain.ReviewRound) string {

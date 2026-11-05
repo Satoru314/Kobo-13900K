@@ -23,12 +23,12 @@ func run() error {
 		return errors.New("KOBO_DATABASE_URL is required")
 	}
 	ctx := context.Background()
-	pg, err := repository.NewPostgres(ctx, url)
+	db, err := repository.NewDB(ctx, url)
 	if err != nil {
 		return err
 	}
-	defer pg.Close()
-	if err := pg.Migrate(ctx); err != nil {
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
 	slog.Info("migrations applied")

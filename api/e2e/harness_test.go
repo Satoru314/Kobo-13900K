@@ -19,12 +19,15 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/labstack/echo/v4"
+
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/mcp"
 	"github.com/Satoru314/Kobo-13900K/api/src/controller/rest"
+	"github.com/Satoru314/Kobo-13900K/api/src/controller/schema"
 	"github.com/Satoru314/Kobo-13900K/api/src/domain"
+	"github.com/Satoru314/Kobo-13900K/api/src/notify"
 	"github.com/Satoru314/Kobo-13900K/api/src/repository"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
-	"github.com/Satoru314/Kobo-13900K/api/src/usecase/irepository"
 )
 
 // ---- fakes ----
@@ -40,7 +43,7 @@ type fakeRunner struct {
 	mu       sync.Mutex
 	agentURL string
 	steps    []step
-	calls    []irepository.RunRequest
+	calls    []usecase.RunRequest
 	toolErrs []string
 	nextID   int
 }
@@ -60,7 +63,7 @@ func (r *fakeRunner) script(steps ...step) {
 	r.steps = append(r.steps, steps...)
 }
 
-func (r *fakeRunner) Run(ctx context.Context, req irepository.RunRequest) error {
+func (r *fakeRunner) Run(ctx context.Context, req usecase.RunRequest) error {
 	r.mu.Lock()
 	r.calls = append(r.calls, req)
 	if len(r.steps) == 0 {
@@ -114,8 +117,8 @@ type fakeGit struct {
 	added     []string
 }
 
-func (g *fakeGit) Remote(context.Context, string) (irepository.RemoteInfo, error) {
-	return irepository.RemoteInfo{Owner: "me", Name: "sandbox", DefaultBranch: "main"}, nil
+func (g *fakeGit) Remote(context.Context, string) (usecase.RemoteInfo, error) {
+	return usecase.RemoteInfo{Owner: "me", Name: "sandbox", DefaultBranch: "main"}, nil
 }
 
 // GitHubOrigin treats every repository as on GitHub except one named "local".
@@ -149,20 +152,20 @@ func (g *fakeGit) HasWorkflows(context.Context, string, string) (bool, error) {
 
 type fakeGitHub struct {
 	mu   sync.Mutex
-	ci   []irepository.CIResult // returned in order; the last one repeats
+	ci   []usecase.CIResult // returned in order; the last one repeats
 	pr   domain.PRState
 	errs int // fail this many calls first
 }
 
-func (g *fakeGitHub) CI(context.Context, string, int) (irepository.CIResult, error) {
+func (g *fakeGitHub) CI(context.Context, string, int) (usecase.CIResult, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.errs > 0 {
 		g.errs--
-		return irepository.CIResult{}, fmt.Errorf("github is down")
+		return usecase.CIResult{}, fmt.Errorf("github is down")
 	}
 	if len(g.ci) == 0 {
-		return irepository.CIResult{State: irepository.CIPending}, nil
+		return usecase.CIResult{State: usecase.CIPending}, nil
 	}
 	r := g.ci[0]
 	if len(g.ci) > 1 {
@@ -171,13 +174,19 @@ func (g *fakeGitHub) CI(context.Context, string, int) (irepository.CIResult, err
 	return r, nil
 }
 
-func (g *fakeGitHub) PR(context.Context, string, int) (irepository.PRInfo, error) {
+func (g *fakeGitHub) PullRequest(context.Context, string, int) (usecase.PRInfo, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.pr == "" {
-		return irepository.PRInfo{State: domain.PRStateOpen}, nil
+		return usecase.PRInfo{State: domain.PRStateOpen}, nil
 	}
-	return irepository.PRInfo{State: g.pr}, nil
+	return usecase.PRInfo{State: g.pr}, nil
+}
+
+// fakeRepoHost is git and GitHub together, as usecase.RepoHost.
+type fakeRepoHost struct {
+	*fakeGit
+	*fakeGitHub
 }
 
 // ---- harness ----
@@ -187,9 +196,7 @@ type harness struct {
 	ctx    context.Context
 	srv    *httptest.Server
 	dir    string // projects directory
-	queue  *usecase.QueueUsecase
-	ci     *usecase.CIUsecase
-	pr     *usecase.PRUsecase
+	uc     *usecase.Usecase
 	runner *fakeRunner
 	git    *fakeGit
 	gh     *fakeGitHub
@@ -204,15 +211,15 @@ func newHarness(t *testing.T) *harness {
 		t.Skip("KOBO_TEST_DATABASE_URL is not set")
 	}
 	ctx := context.Background()
-	pg, err := repository.NewPostgres(ctx, url)
+	db, err := repository.NewDB(ctx, url)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(pg.Close)
-	if err := pg.Migrate(ctx); err != nil {
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := pg.TruncateAll(ctx); err != nil {
+	if err := db.TruncateAll(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -227,30 +234,14 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{t: t, ctx: ctx, runner: &fakeRunner{}, git: &fakeGit{worktrees: map[string]string{}},
 		gh: &fakeGitHub{}, wt: settings.WorktreesDir, dir: projectsDir}
 
-	tasks := repository.NewTaskRepository(pg)
-	sessions := repository.NewSessionRepository(pg)
-	prs := repository.NewPullRequestRepository(pg)
-	rounds := repository.NewReviewRoundRepository(pg)
-	events := repository.NewEventRepository(pg)
-	sig := usecase.NewQueueSignal()
-	changes := usecase.NewChanges()
-	active := usecase.NewActiveRun()
-	projects := usecase.NewProjectUsecase(repository.NewProjectRepository(pg), h.git, settings)
-	taskUC := usecase.NewTaskUsecase(pg, tasks, prs, rounds, events, projects, sig, changes)
-	h.queue = usecase.NewQueueUsecase(pg, tasks, sessions, prs, rounds, events, repository.NewQueueStateRepository(pg), projects, h.runner, h.git,
-		domain.Queue{}, settings, active, sig, changes)
-	completionUC := usecase.NewCompletionUsecase(pg, tasks, sessions, prs, rounds, events, projects, h.git, settings, active, sig, changes)
-	h.ci = usecase.NewCIUsecase(pg, tasks, prs, rounds, events, projects, h.gh, settings, sig, changes)
-	h.pr = usecase.NewPRUsecase(pg, tasks, prs, events, projects, h.gh, changes)
+	hub := notify.New()
+	h.uc = usecase.New(db, fakeRepoHost{h.git, h.gh}, h.runner, hub, settings)
 
-	mux := http.NewServeMux()
-	rest.NewRouter(rest.NewTaskHandler(taskUC), rest.NewProjectHandler(projects),
-		rest.NewQueueHandler(h.queue), rest.NewEventsHandler(changes), rest.NewHealthHandler()).Register(mux)
-	m := mcp.NewServer(mcp.NewTaskTools(taskUC), mcp.NewProjectTools(projects),
-		mcp.NewQueueTools(h.queue), mcp.NewCompletionTools(completionUC))
-	mux.Handle("/mcp", m.UserHandler())
-	mux.Handle("/mcp/agent", m.AgentHandler())
-	h.srv = httptest.NewServer(mux)
+	e := echo.New()
+	rest.Register(e, h.uc, hub)
+	e.Any("/mcp", echo.WrapHandler(mcp.UserHandler(h.uc)))
+	e.Any("/mcp/agent", echo.WrapHandler(mcp.AgentHandler(h.uc)))
+	h.srv = httptest.NewServer(e)
 	t.Cleanup(h.srv.Close)
 	h.runner.agentURL = h.srv.URL + "/mcp/agent"
 
@@ -304,6 +295,9 @@ func (h *harness) rest(method, path string, body any, out any) int {
 		_ = json.NewEncoder(&buf).Encode(body)
 	}
 	req, _ := http.NewRequest(method, h.srv.URL+path, &buf)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		h.t.Fatal(err)
@@ -315,70 +309,81 @@ func (h *harness) rest(method, path string, body any, out any) int {
 	return resp.StatusCode
 }
 
-func (h *harness) detail(id int64) usecase.TaskDetail {
+func (h *harness) detail(id int64) schema.TaskDetail {
 	h.t.Helper()
-	var d usecase.TaskDetail
+	var d schema.TaskDetail
 	if code := h.rest("GET", fmt.Sprintf("/tasks/%d", id), nil, &d); code != 200 {
 		h.t.Fatalf("GET /tasks/%d = %d", id, code)
 	}
 	return d
 }
 
-func (h *harness) wantStatus(id int64, want domain.Status) usecase.TaskDetail {
+func (h *harness) wantStatus(id int64, want domain.Status) schema.TaskDetail {
 	h.t.Helper()
 	d := h.detail(id)
-	if d.Task.Status != want {
+	if d.Task.Status != string(want) {
 		h.t.Fatalf("task %d status = %s, want %s (last_error=%q, tool errors=%v)",
 			id, d.Task.Status, want, d.LastError, h.runner.toolErrs)
 	}
 	return d
 }
 
+// ranRun is what the fake AI was started with on one run.
+type ranRun struct {
+	usecase.RunRequest
+	Task struct{ ID int64 }
+}
+
 // runNext does one pass of the queue worker. It fails the test when nothing is ready.
-func (h *harness) runNext() usecase.Run {
+func (h *harness) runNext() ranRun {
 	h.t.Helper()
-	run, ok, err := h.queue.Take(h.ctx, time.Now())
-	if err != nil || !ok {
-		h.t.Fatalf("take: ok=%v err=%v", ok, err)
-	}
-	runErr := h.queue.Execute(h.ctx, run)
-	if err := h.queue.Settle(h.ctx, run, runErr, time.Now()); err != nil {
-		h.t.Fatalf("settle: %v", err)
+	before := len(h.runner.calls)
+	ran, err := h.uc.RunNext(h.ctx, time.Now())
+	if err != nil || !ran {
+		h.t.Fatalf("run next: ran=%v err=%v", ran, err)
 	}
 	if len(h.git.worktrees) != 0 {
 		h.t.Fatalf("worktrees left behind: %v", h.git.worktrees)
 	}
-	return run
+	if len(h.runner.calls) == before {
+		h.t.Fatal("the AI was not started")
+	}
+	r := ranRun{RunRequest: h.runner.calls[len(h.runner.calls)-1]}
+	if _, err := fmt.Sscanf(r.LogName, "task-%d-", &r.Task.ID); err != nil {
+		h.t.Fatalf("log name %q: %v", r.LogName, err)
+	}
+	return r
 }
 
 func (h *harness) nothingReady() {
 	h.t.Helper()
-	if run, ok, _ := h.queue.Take(h.ctx, time.Now()); ok {
-		h.t.Fatalf("task %d was ready, want nothing", run.Task.ID)
+	before := len(h.runner.calls)
+	if ran, err := h.uc.RunNext(h.ctx, time.Now()); ran || len(h.runner.calls) != before {
+		h.t.Fatalf("a task was ready, want nothing (err=%v)", err)
 	}
 }
 
 func (h *harness) checkCI() {
 	h.t.Helper()
-	if err := h.ci.Check(h.ctx, time.Now()); err != nil {
+	if err := h.uc.CheckCI(h.ctx, time.Now()); err != nil {
 		h.t.Fatal(err)
 	}
 }
 
 func (h *harness) checkPR() {
 	h.t.Helper()
-	if err := h.pr.Check(h.ctx, time.Now()); err != nil {
+	if err := h.uc.CheckPullRequests(h.ctx, time.Now()); err != nil {
 		h.t.Fatal(err)
 	}
 }
 
 func (h *harness) eventTypes(id int64) []domain.EventType {
 	h.t.Helper()
-	var events []domain.Event
+	var events []schema.Event
 	h.rest("GET", fmt.Sprintf("/tasks/%d/events", id), nil, &events)
 	out := make([]domain.EventType, len(events))
 	for i, e := range events {
-		out[i] = e.Type
+		out[i] = domain.EventType(e.Type)
 	}
 	return out
 }

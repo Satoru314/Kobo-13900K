@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"slices"
 	"sort"
 
 	"github.com/Satoru314/Kobo-13900K/api/migrations"
@@ -18,9 +19,9 @@ func migrationNames() ([]string, error) {
 
 // Migrate applies the embedded SQL files that have not been applied yet, in name
 // order. Only make migrate (cmd/migrate) and the tests call it.
-func (p *Postgres) Migrate(ctx context.Context) error {
-	if _, err := p.pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`); err != nil {
+func (d *DB) Migrate(ctx context.Context) error {
+	if err := d.gorm.WithContext(ctx).Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+		version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`).Error; err != nil {
 		return err
 	}
 	names, err := migrationNames()
@@ -28,57 +29,55 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 		return err
 	}
 	for _, name := range names {
-		if err := p.applyMigration(ctx, name); err != nil {
+		if err := d.applyMigration(ctx, name); err != nil {
 			return fmt.Errorf("migration %s: %w", name, err)
 		}
 	}
 	return nil
 }
 
-func (p *Postgres) applyMigration(ctx context.Context, name string) error {
-	return p.InTx(ctx, func(ctx context.Context) error {
-		var exists bool
-		if err := p.conn(ctx).QueryRow(ctx,
-			"SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)", name).Scan(&exists); err != nil {
+func (d *DB) applyMigration(ctx context.Context, name string) error {
+	return d.InTx(ctx, func(ctx context.Context) error {
+		var applied bool
+		if err := d.conn(ctx).Raw("SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = ?)", name).
+			Scan(&applied).Error; err != nil {
 			return err
 		}
-		if exists {
+		if applied {
 			return nil
 		}
 		sql, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			return err
 		}
-		if _, err := p.conn(ctx).Exec(ctx, string(sql)); err != nil {
+		if err := d.conn(ctx).Exec(string(sql)).Error; err != nil {
 			return err
 		}
-		_, err = p.conn(ctx).Exec(ctx, "INSERT INTO schema_migrations (version) VALUES ($1)", name)
-		return err
+		return d.conn(ctx).Exec("INSERT INTO schema_migrations (version) VALUES (?)", name).Error
 	})
 }
 
 // PendingMigrations lists the embedded migrations that have not been applied.
 // kobo refuses to start while any are pending; make migrate applies them.
-func (p *Postgres) PendingMigrations(ctx context.Context) ([]string, error) {
+func (d *DB) PendingMigrations(ctx context.Context) ([]string, error) {
 	names, err := migrationNames()
 	if err != nil {
 		return nil, err
 	}
 	var exists bool
-	if err := p.pool.QueryRow(ctx, "SELECT to_regclass('schema_migrations') IS NOT NULL").Scan(&exists); err != nil {
+	if err := d.gorm.WithContext(ctx).Raw("SELECT to_regclass('schema_migrations') IS NOT NULL").Scan(&exists).Error; err != nil {
 		return nil, err
 	}
 	if !exists {
 		return names, nil
 	}
+	var applied []string
+	if err := d.gorm.WithContext(ctx).Raw("SELECT version FROM schema_migrations").Scan(&applied).Error; err != nil {
+		return nil, err
+	}
 	var pending []string
 	for _, name := range names {
-		var applied bool
-		if err := p.pool.QueryRow(ctx,
-			"SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version = $1)", name).Scan(&applied); err != nil {
-			return nil, err
-		}
-		if !applied {
+		if !slices.Contains(applied, name) {
 			pending = append(pending, name)
 		}
 	}

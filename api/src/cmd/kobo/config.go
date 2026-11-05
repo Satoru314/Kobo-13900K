@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Satoru314/Kobo-13900K/api/src/domain"
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
 
@@ -16,7 +15,6 @@ type Config struct {
 	Listen      string
 	ClaudeBin   string
 	LogDir      string
-	OffPeak     domain.OffPeakWindow
 	Settings    usecase.Settings
 }
 
@@ -69,11 +67,11 @@ func LoadConfig() (Config, error) {
 			RetryDelay:      r.duration("KOBO_RETRY_DELAY", "1m"),
 		},
 	}
-	window, err := domain.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
+	window, err := usecase.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
 	if err != nil && r.err == nil {
 		r.err = err
 	}
-	c.OffPeak = window
+	c.Settings.OffPeak = window
 	return c, r.err
 }
 
