@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,32 +135,63 @@ func TestNextStatus(t *testing.T) {
 	}
 }
 
-func TestOffPeakWindow(t *testing.T) {
-	night, err := ParseOffPeakWindow("23:30-06:00")
+func TestOffPeakSchedule(t *testing.T) {
+	weekday := []string{"13:00-15:00", "19:00-10:00"}
+	schedule, err := ParseOffPeakSchedule(map[string][]string{
+		"mon": weekday,
+		"tue": weekday,
+		"wed": weekday,
+		"thu": weekday,
+		"fri": weekday,
+		"sat": {"00:00-24:00"},
+		"sun": {"00:00-24:00", "19:00-10:00"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	day, _ := ParseOffPeakWindow("09:00-17:00")
-	clock := func(h, m int) time.Time { return time.Date(2026, 11, 4, h, m, 0, 0, time.UTC) }
+	clock := func(day, h, m int) time.Time {
+		return time.Date(2026, 11, day, h, m, 0, 0, time.Local)
+	}
 	cases := []struct {
-		w    OffPeakWindow
+		name string
 		t    time.Time
 		want bool
 	}{
-		{night, clock(23, 30), true},
-		{night, clock(2, 0), true},
-		{night, clock(6, 0), false},
-		{night, clock(12, 0), false},
-		{day, clock(9, 0), true},
-		{day, clock(16, 59), true},
-		{day, clock(17, 0), false},
+		{"mon 09:00 from sunday 19:00", clock(2, 9, 0), true},
+		{"mon 10:30", clock(2, 10, 30), false},
+		{"mon 14:00", clock(2, 14, 0), true},
+		{"fri 20:00", clock(6, 20, 0), true},
+		{"sat 12:00", clock(7, 12, 0), true},
+		{"sun 23:00", clock(8, 23, 0), true},
 	}
 	for _, c := range cases {
-		if got := inOffPeak(c.w, c.t); got != c.want {
-			t.Errorf("%v contains %s = %v, want %v", c.w, c.t.Format("15:04"), got, c.want)
+		if got := schedule.Active(c.t); got != c.want {
+			t.Errorf("%s: Active = %v, want %v", c.name, got, c.want)
 		}
 	}
-	if _, err := ParseOffPeakWindow("night"); err == nil {
-		t.Error("parsed garbage")
+}
+
+func TestParseOffPeakScheduleRejectsBadInput(t *testing.T) {
+	days := func(mon []string) map[string][]string {
+		return map[string][]string{"mon": mon, "tue": nil, "wed": nil, "thu": nil, "fri": nil, "sat": nil, "sun": nil}
+	}
+	for _, tc := range []struct {
+		name string
+		days map[string][]string
+		want string
+	}{
+		{"missing", nil, "required"},
+		{"missing day", map[string][]string{"mon": {}}, "tue is missing"},
+		{"unknown day", map[string][]string{"mon": {}, "tue": {}, "wed": {}, "thu": {}, "fri": {}, "sat": {}, "sun": {}, "monday": {}}, "unknown day"},
+		{"garbage", days([]string{"night"}), "want HH:MM-HH:MM"},
+		{"same", days([]string{"09:00-09:00"}), "same"},
+		{"bad minute", days([]string{"09:60-10:00"}), "out of range"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseOffPeakSchedule(tc.days)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }

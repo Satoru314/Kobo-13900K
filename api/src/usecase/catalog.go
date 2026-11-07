@@ -8,6 +8,9 @@ type AIModel struct {
 	Label    string
 	Provider string
 	Model    string
+	// OffPeak is when the model is cheap. New off_peak tasks use the schedule
+	// of the development model in the setting.
+	OffPeak OffPeakSchedule
 }
 
 // Catalog is the AI models kobo may run, read from ai.json at startup.

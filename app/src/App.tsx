@@ -1,9 +1,53 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
-import { api, type AIModel, type AISetting, type AIView, type Candidate, type Mode, type Project, type Status, type TaskDetail, type TaskEvent, type TaskSummary } from './api';
+import { api, type AIModel, type AISetting, type AIView, type Candidate, type Mode, type Project, type Status, type TaskDetail, type TaskEvent, type TaskSummary, type Weekday } from './api';
 import { boardLayout, CARD, HDR, type BoardLayout } from './board';
 
 const MODE_NAMES: Record<Mode, string> = { priority: '優先', immediate: '通常', off_peak: '夜間' };
 const MODE_RANK: Record<Mode, number> = { priority: 0, immediate: 1, off_peak: 2 };
+const WEEKDAYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const DAY_NAMES = ['月', '火', '水', '木', '金', '土', '日'];
+
+function clockMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function offPeakDayText(windows: string[]): string {
+  if (windows.length === 0) return 'なし';
+  const spans = windows.map((w) => {
+    const [from, to] = w.split('-');
+    const start = clockMinutes(from);
+    let end = clockMinutes(to);
+    if (end <= start) end += 24 * 60;
+    return [start, Math.min(end, 24 * 60)] as const;
+  }).filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0]);
+  let covered = 0;
+  for (const [start, end] of spans) {
+    if (start > covered) break;
+    covered = Math.max(covered, end);
+  }
+  if (covered >= 24 * 60) return '終日';
+  return windows.map((w) => w.replace('-', '–')).join(', ');
+}
+
+function offPeakText(offPeak: Record<Weekday, string[]>): string {
+  const texts = WEEKDAYS.map((d) => offPeakDayText(offPeak[d] ?? []));
+  const groups: { start: number; end: number; text: string }[] = [];
+  texts.forEach((text, i) => {
+    const last = groups[groups.length - 1];
+    if (last && last.text === text) last.end = i;
+    else groups.push({ start: i, end: i, text });
+  });
+  return groups.map((g) => {
+    let label: string;
+    if (g.start === 0 && g.end === 6) label = '毎日';
+    else if (g.start === 0 && g.end === 4) label = '平日';
+    else if (g.start === 5 && g.end === 6) label = '土日';
+    else if (g.start === g.end) label = DAY_NAMES[g.start];
+    else label = `${DAY_NAMES[g.start]}〜${DAY_NAMES[g.end]}`;
+    return `${label} ${g.text}`;
+  }).join(' / ');
+}
 const VISOR: Partial<Record<Status, string>> = { developing: '開発中', fixing: '修正中', reviewing: 'レビュー' };
 const BORDER = '1px solid #d6d5d1';
 
@@ -221,6 +265,7 @@ function Composer() {
     return m === 'priority' || m === 'immediate' || m === 'off_peak' ? m : 'immediate';
   });
   const [modeOpen, setModeOpen] = useState(false);
+  const [schedule, setSchedule] = useState('');
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -235,6 +280,16 @@ function Composer() {
 
   const loadProjects = useCallback(() => api.projects().then(setProjects, (e: Error) => setError(e.message)), []);
   useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => {
+    api.ai().then((v) => {
+      const model = v.models.find((m) => m.id === v.setting.dev_ai);
+      if (!model) {
+        setError(`AI model ${v.setting.dev_ai} is not in the catalog`);
+        return;
+      }
+      setSchedule(offPeakText(model.off_peak));
+    }, (e: Error) => setError(e.message));
+  }, []);
   const current = projects.some((p) => p.dir === project) ? project : (projects[0]?.dir ?? '');
 
   const choose = (dir: string) => { setProject(dir); store('kobo.project', dir); };
@@ -292,11 +347,14 @@ function Composer() {
                 <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5L6 7.5l3-3" stroke="#3a3935" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
               </button>
               {modeOpen && (
-                <ul role="menu" style={{ position: 'absolute', right: 0, bottom: 'calc(100% + 6px)', margin: 0, padding: 4, listStyle: 'none', minWidth: 168, border: BORDER, background: '#ffffff', boxShadow: '0 4px 16px rgba(15,15,15,0.08)' }}>
+                <ul role="menu" style={{ position: 'absolute', right: 0, bottom: 'calc(100% + 6px)', margin: 0, padding: 4, listStyle: 'none', width: 'max-content', minWidth: 168, border: BORDER, background: '#ffffff', boxShadow: '0 4px 16px rgba(15,15,15,0.08)' }}>
                   {(Object.keys(MODE_NAMES) as Mode[]).map((m) => (
                     <li key={m}>
-                      <button type="button" role="menuitemradio" aria-checked={m === mode} className="ghost" onClick={() => { setMode(m); store('kobo.mode', m); setModeOpen(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', textAlign: 'left', cursor: 'pointer' }}>
+                      <button type="button" role="menuitemradio" aria-checked={m === mode} className="ghost" onClick={() => { setMode(m); store('kobo.mode', m); setModeOpen(false); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', border: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: '#1f1e1b', textAlign: 'left', whiteSpace: 'nowrap', cursor: 'pointer' }}>
                         {MODE_NAMES[m]}
+                        {m === 'off_peak' && schedule && (
+                          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 500, color: '#6b6964', whiteSpace: 'nowrap' }}>{schedule}</span>
+                        )}
                         <span style={{ marginLeft: 'auto', width: 14, display: 'flex', justifyContent: 'center' }}>
                           {m === mode && <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" fill="#1f1e1b"><path d={CI_MARKS.success.path} /></svg>}
                         </span>

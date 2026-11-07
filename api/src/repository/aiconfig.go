@@ -32,10 +32,11 @@ type aiFile struct {
 		Agent  string `json:"agent"`
 	} `json:"providers"`
 	Models []struct {
-		ID       string `json:"id"`
-		Label    string `json:"label"`
-		Provider string `json:"provider"`
-		Model    string `json:"model"`
+		ID       string              `json:"id"`
+		Label    string              `json:"label"`
+		Provider string              `json:"provider"`
+		Model    string              `json:"model"`
+		OffPeak  map[string][]string `json:"off_peak"`
 	} `json:"models"`
 }
 
@@ -75,7 +76,11 @@ func LoadAICatalog(path string) (*AICatalog, error) {
 		if p.Runner == "opencode" && strings.TrimSpace(m.Model) == "" {
 			return nil, fmt.Errorf("AI catalog %s: opencode model %q needs model", path, m.ID)
 		}
-		model := usecase.AIModel{ID: m.ID, Label: m.Label, Provider: m.Provider, Model: m.Model}
+		offPeak, err := usecase.ParseOffPeakSchedule(m.OffPeak)
+		if err != nil {
+			return nil, fmt.Errorf("AI catalog %s: model %q: %w", path, m.ID, err)
+		}
+		model := usecase.AIModel{ID: m.ID, Label: m.Label, Provider: m.Provider, Model: m.Model, OffPeak: offPeak}
 		c.models = append(c.models, model)
 		c.byID[m.ID] = model
 	}

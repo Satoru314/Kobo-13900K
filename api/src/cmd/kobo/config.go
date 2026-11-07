@@ -107,11 +107,6 @@ func LoadConfig() (Config, error) {
 	if v := c.Settings.ShotsRepo; v != "" && !ownerRepo.MatchString(v) && r.err == nil {
 		r.err = fmt.Errorf("KOBO_SHOTS_REPO: %q is not owner/name", v)
 	}
-	window, err := usecase.ParseOffPeakWindow(r.str("KOBO_OFF_PEAK", "01:00-07:00"))
-	if err != nil && r.err == nil {
-		r.err = err
-	}
-	c.Settings.OffPeak = window
 	return c, r.err
 }
 

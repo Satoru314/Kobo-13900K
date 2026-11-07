@@ -14,19 +14,46 @@
     {
       "id": "claude",
       "label": "Claude",
-      "provider": "claude"
+      "provider": "claude",
+      "off_peak": {
+        "mon": ["19:00-10:00"],
+        "tue": ["19:00-10:00"],
+        "wed": ["19:00-10:00"],
+        "thu": ["19:00-10:00"],
+        "fri": ["19:00-10:00"],
+        "sat": ["19:00-10:00"],
+        "sun": ["19:00-10:00"]
+      }
     },
     {
       "id": "deepseek-v4.1-flash-free",
       "label": "DeepSeek V4.1 Flash (無料)",
       "provider": "opencode",
-      "model": "opencode/deepseek-v4.1-flash-free#max"
+      "model": "opencode/deepseek-v4.1-flash-free#max",
+      "off_peak": {
+        "mon": ["13:00-15:00", "19:00-10:00"],
+        "tue": ["13:00-15:00", "19:00-10:00"],
+        "wed": ["13:00-15:00", "19:00-10:00"],
+        "thu": ["13:00-15:00", "19:00-10:00"],
+        "fri": ["13:00-15:00", "19:00-10:00"],
+        "sat": ["00:00-24:00"],
+        "sun": ["00:00-24:00", "19:00-10:00"]
+      }
     },
     {
       "id": "deepseek-v4.1-flash",
       "label": "DeepSeek V4.1 Flash",
       "provider": "opencode",
-      "model": "opencode-go/deepseek-v4.1-flash#max"
+      "model": "opencode-go/deepseek-v4.1-flash#max",
+      "off_peak": {
+        "mon": ["13:00-15:00", "19:00-10:00"],
+        "tue": ["13:00-15:00", "19:00-10:00"],
+        "wed": ["13:00-15:00", "19:00-10:00"],
+        "thu": ["13:00-15:00", "19:00-10:00"],
+        "fri": ["13:00-15:00", "19:00-10:00"],
+        "sat": ["00:00-24:00"],
+        "sun": ["00:00-24:00", "19:00-10:00"]
+      }
     }
   ]
 }

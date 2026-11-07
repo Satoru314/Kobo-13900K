@@ -23,8 +23,8 @@ type DB interface {
 	ListTasks(ctx context.Context, statuses ...domain.Status) ([]domain.Task, error)
 	UpdateTask(ctx context.Context, t domain.Task) error
 	// NextRunnableTask locks and returns the waiting task the queue takes next at
-	// now. inOffPeak says whether off_peak tasks may start.
-	NextRunnableTask(ctx context.Context, now time.Time, inOffPeak bool) (domain.Task, bool, error)
+	// now. offPeakOpen says whether new off_peak tasks may start.
+	NextRunnableTask(ctx context.Context, now time.Time, offPeakOpen bool) (domain.Task, bool, error)
 	// ListQueue returns the waiting tasks in the order the queue takes them.
 	ListQueue(ctx context.Context) ([]domain.Task, error)
 

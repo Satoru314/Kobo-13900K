@@ -26,8 +26,6 @@ type Settings struct {
 	// MaxAutoRetries is how many times a failed run is repeated before the task goes to error.
 	MaxAutoRetries int
 	RetryDelay     time.Duration
-	// OffPeak is when off_peak tasks may start.
-	OffPeak OffPeakWindow
 	// ShotsRepo is the owner/name of the repository that holds PR screenshots.
 	ShotsRepo string
 }

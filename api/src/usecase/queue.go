@@ -94,7 +94,11 @@ func (u *Usecase) take(ctx context.Context, now time.Time) (run, bool, error) {
 		if err != nil || len(active) > 0 {
 			return err
 		}
-		task, ok, err := u.db.NextRunnableTask(ctx, now, inOffPeak(u.settings.OffPeak, now))
+		offPeakOpen, err := u.offPeakOpen(ctx, now)
+		if err != nil {
+			return err
+		}
+		task, ok, err := u.db.NextRunnableTask(ctx, now, offPeakOpen)
 		if err != nil || !ok {
 			return err
 		}

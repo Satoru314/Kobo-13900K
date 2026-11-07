@@ -96,10 +96,11 @@ type QueueState struct {
 }
 
 type AIModel struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	ID       string              `json:"id"`
+	Label    string              `json:"label"`
+	Provider string              `json:"provider"`
+	Model    string              `json:"model"`
+	OffPeak  map[string][]string `json:"off_peak"`
 }
 
 type AISetting struct {
@@ -220,8 +221,18 @@ func FromSessionInfo(s usecase.SessionInfo) Session {
 		Model: s.Model, CreatedAt: s.CreatedAt}
 }
 
+var weekdays = [7]string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
 func FromAIModel(m usecase.AIModel) AIModel {
-	return AIModel{ID: m.ID, Label: m.Label, Provider: m.Provider, Model: m.Model}
+	offPeak := make(map[string][]string, len(weekdays))
+	for i, day := range weekdays {
+		windows := make([]string, len(m.OffPeak.Days[i]))
+		for j, w := range m.OffPeak.Days[i] {
+			windows[j] = w.String()
+		}
+		offPeak[day] = windows
+	}
+	return AIModel{ID: m.ID, Label: m.Label, Provider: m.Provider, Model: m.Model, OffPeak: offPeak}
 }
 
 func FromAISetting(s domain.AISetting) AISetting {
