@@ -455,7 +455,7 @@ erDiagram
 - CT102 の satoru314 を docker グループに入れる（root が必要）
 - CT102 で Docker を動かすため、CT の nesting が有効か確認する
 - `claude` / `opencode` / `gh` / `git` / `playwright-mcp` を入れる。chromium も Playwright のセットアップ手順で入れる
-- Kobo はこれらをインストールしない。`make check` で存在を確認し、足りなければ起動しない
+- Kobo はこれらをインストールしない。`make check` で存在と最低バージョンを確認し、足りなければ起動しない
 - `KOBO_AI_CONFIG` に `ai.json` のパスを指定する。`KOBO_BROWSER=off` のときだけブラウザなしで動く
 
 ### 設定
@@ -553,7 +553,7 @@ Kobo-13900K/
 - 型の名前: フロントに送る型は Schema、usecase の入出力は DTO、repository の行は Model
 - DI のフレームワークは使わない。`cmd/kobo` で手で組み立てる
 - 起動時にマイグレーションを適用しない。未適用のものがあれば起動しない（`make migrate` で適用する）
-- 起動時に外部コマンドとディレクトリを確認し、足りなければ起動しない。`make check` でも同じ確認ができる
+- 起動時に外部コマンドとディレクトリを確認する。コマンドがないとき、`--version` の出力から版を読めないとき、版が kobo の使う機能の最低バージョンより古いときは起動しない。機能を試して判定せず、最低バージョンとの比較で判定する。最低バージョンは `preflight.go` の表で1か所に管理し、実行ファイルの名前ではなく役割（gh、git、claude、opencode、playwright-mcp）で引く。`make check` でも同じ確認ができる
 - 実行時にパッケージやブラウザをインストールしない。`npx` や対話シェルの PATH 読み込みも使わない
 
 ### worker

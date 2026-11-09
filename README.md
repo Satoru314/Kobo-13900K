@@ -9,6 +9,6 @@ AI に開発タスクを渡し、キューで順に実行させて、PR 作成�
 - `claude` / `opencode` / `gh` / `git` / `playwright-mcp` を入れる（kobo はインストールしない）
 - `cp .env.example .env` して、DB とパスを自分の環境に合わせる
 - `make migrate` で DB を作る
-- `make check` でコマンドと設定を確認する（足りなければ起動しない）
+- `make check` でコマンドの存在と最低バージョン、設定を確認する（足りなければ起動しない）
 
 AI モデルは `ai.json` に書く。モデルを増やすときは `models` に1エントリ（`off_peak` を含む）足すだけで、DB の変更は要らない。
