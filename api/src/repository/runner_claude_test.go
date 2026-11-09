@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,6 +111,34 @@ func TestRunWithoutBrowserLeavesPlaywrightOut(t *testing.T) {
 	if _, ok := servers["kobo-playwright"]; ok {
 		t.Errorf("playwright should be absent: %+v", servers)
 	}
+}
+
+func TestRunDisallowsUnneededTools(t *testing.T) {
+	e := newRunnerEnv(t, false)
+	args := e.run(usecase.RunRequest{})
+	want := []string{
+		"PushNotification",
+		"SendMessage",
+		"ListAgents",
+		"RemoteTrigger",
+		"CronCreate",
+		"CronDelete",
+		"CronList",
+		"ScheduleWakeup",
+	}
+	for i, a := range args {
+		if a != "--disallowedTools" {
+			continue
+		}
+		if i+1 >= len(args) {
+			t.Fatalf("--disallowedTools has no value: %v", args)
+		}
+		if got := strings.Split(args[i+1], ","); !slices.Equal(got, want) {
+			t.Errorf("disallowed tools = %v, want %v", got, want)
+		}
+		return
+	}
+	t.Fatalf("no --disallowedTools in %v", args)
 }
 
 func TestRunUsesTheSessionModelAndResume(t *testing.T) {

@@ -7,10 +7,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Satoru314/Kobo-13900K/api/src/usecase"
 )
+
+// claudeDisallowedTools lists the Claude Code tools kobo's AI never needs. They
+// would let it notify the user, message the user's other sessions, or schedule
+// work to run later, which is outside a task's worktree and lifetime. This is a
+// deny list rather than an allow list so a new tool Claude needs is not lost.
+var claudeDisallowedTools = []string{
+	"PushNotification",
+	"SendMessage",
+	"ListAgents",
+	"RemoteTrigger",
+	"CronCreate",
+	"CronDelete",
+	"CronList",
+	"ScheduleWakeup",
+}
 
 // ClaudeRunner runs Claude Code in headless mode with every permission granted,
 // connected to kobo's agent MCP endpoint so it can report back, and to a headless
@@ -65,7 +81,13 @@ func (r *ClaudeRunner) Run(ctx context.Context, req usecase.RunRequest) error {
 		return err
 	}
 
-	args := []string{"-p", "--dangerously-skip-permissions", "--mcp-config", mcp, "--output-format", "stream-json", "--verbose"}
+	args := []string{
+		"-p", "--dangerously-skip-permissions", "--mcp-config", mcp,
+		// Comma-separated in one argument so the variadic option does not swallow
+		// the prompt that follows the other options.
+		"--disallowedTools", strings.Join(claudeDisallowedTools, ","),
+		"--output-format", "stream-json", "--verbose",
+	}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}

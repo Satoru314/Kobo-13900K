@@ -127,6 +127,9 @@ AI は `report_blocked` で理由を添えて報告できる（例: 要件に大
 - 通知を受けたら Kobo がプロセスを止めて status を進める。会話は残しておき、次に resume する
 - 完了通知を出さずにプロセスが終わったら、システムエラーとして扱う
 - **権限**：AI は確認なしで全部許可して動かす（Claude Code なら `--dangerously-skip-permissions`、opencode なら `--auto`）。止まらないことを優先する
+- **渡さないツール**：ツール名も止め方も CLI ごとに違うので、AI ごとの違いとして各 runner が自分のリストを持ち、自分の CLI の方法で渡さない。usecase や共通コードに1つのリストは置かない
+  - Claude Code：`--disallowedTools` で `PushNotification` / `SendMessage` / `ListAgents` / `RemoteTrigger` / `CronCreate` / `CronDelete` / `CronList` / `ScheduleWakeup` を渡さない。新しく必要なツールを落とさないよう、許可リストではなく禁止リストにしている
+  - opencode：止め方を確認してから別に対応する（今回は何もしない）
 - **実行時間の上限**：開発と fix は60分、レビューは30分（設定で変えられる）。超えたらプロセスを確実に止めてシステムエラーにする
 - **完了通知の本人確認はしない**：直列なので、通知は常に実行中のタスクのもの。そのため時間切れのプロセスは必ず止め、遅れて届く通知が起きないようにする
 - **レビュー**：レビュー AI は指摘を PR にコメントとして書き、結果を `complete_review` で Kobo に返す
