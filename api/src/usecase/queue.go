@@ -232,7 +232,11 @@ func (u *Usecase) execute(ctx context.Context, r run) error {
 	if err := u.repo.AddWorktree(ctx, repoDir, r.workDir, br, base); err != nil {
 		return fmt.Errorf("create worktree: %w", err)
 	}
-	defer u.repo.RemoveWorktree(context.WithoutCancel(ctx), repoDir, r.workDir)
+	defer func() {
+		if err := u.repo.RemoveWorktree(context.WithoutCancel(ctx), repoDir, r.workDir); err != nil {
+			slog.Warn("remove worktree", "task", r.task.ID, "role", r.role, "path", r.workDir, "err", err)
+		}
+	}()
 
 	runCtx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
