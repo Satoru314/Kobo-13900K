@@ -85,7 +85,10 @@ type RepoHost interface {
 	// AddWorktree fetches origin and creates a worktree at path from origin/base.
 	// With branch set, the worktree checks out branch reset to origin/base; otherwise it is detached.
 	AddWorktree(ctx context.Context, repoDir, path, branch, base string) error
-	// RemoveWorktree deletes the worktree at path, even if it has changes.
+	// RemoveWorktree deletes the worktree at path completely, together with
+	// whatever still runs inside it: processes working there are killed, the
+	// files are removed, and git's records of it are cleared, so a later
+	// AddWorktree can recreate it. A missing path is success.
 	RemoveWorktree(ctx context.Context, repoDir, path string) error
 	// HasWorkflows reports whether origin/branch contains GitHub Actions workflows.
 	HasWorkflows(ctx context.Context, repoDir, branch string) (bool, error)

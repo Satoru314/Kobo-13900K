@@ -101,11 +101,21 @@ func (r *RepoHost) AddWorktree(ctx context.Context, repoDir, path, branch, base 
 	return err
 }
 
+// RemoveWorktree deletes the worktree at path completely, together with
+// whatever still runs inside it: processes working there are killed, the files
+// are removed, and git's records of the worktree are pruned. It is one path
+// that works whether or not git still knows the worktree, so a worktree left
+// half-removed by an earlier failed run is cleaned up too. A path that does
+// not exist is success.
 func (r *RepoHost) RemoveWorktree(ctx context.Context, repoDir, path string) error {
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	_, err := r.git.output(ctx, repoDir, "git", "worktree", "remove", "--force", path)
+	killWorkingIn(path)
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	_, err := r.git.output(ctx, repoDir, "git", "worktree", "prune")
 	return err
 }
 
